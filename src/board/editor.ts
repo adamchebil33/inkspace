@@ -1,0 +1,558 @@
+import {
+  clampZoom,
+  handleAt,
+  rectFromPoints,
+  rectsIntersect,
+  resizeRect,
+  screenToWorld,
+  topShapeAt,
+  zoomAt,
+  type Camera,
+  type Handle,
+  type Point,
+  type Rect,
+} from './geometry'
+import { HANDLE_SIZE, type RenderState } from './render'
+import type { BoardStore } from './store'
+import type { ColorName, Shape, ShapeType, Tool } from './types'
+
+/** A pointer event reduced to what the editor needs; x/y are canvas pixels. */
+export interface PointerInput {
+  x: number
+  y: number
+  button: number
+  shift: boolean
+}
+
+export interface WheelInput {
+  x: number
+  y: number
+  deltaX: number
+  deltaY: number
+  /** Ctrl/Cmd held, or a trackpad pinch (browsers report it as ctrl+wheel). */
+  zoom: boolean
+}
+
+/** Everything the React UI renders from. Replaced, never mutated. */
+export interface EditorState {
+  tool: Tool
+  selection: readonly string[]
+  camera: Camera
+  editingId: string | null
+  color: ColorName
+  /** Bumps on every document change so the UI re-reads shapes. */
+  docVersion: number
+}
+
+type Interaction =
+  | { kind: 'idle' }
+  | { kind: 'pan'; startScreen: Point; startCamera: Camera }
+  | {
+      kind: 'move'
+      startScreen: Point
+      startWorld: Point
+      originals: Map<string, Point>
+      dragged: boolean
+      /** Plain click on an already-selected shape narrows the selection to it. */
+      collapseTo: string | null
+    }
+  | {
+      kind: 'resize'
+      id: string
+      handle: Handle
+      startWorld: Point
+      original: Rect
+    }
+  | {
+      kind: 'marquee'
+      startWorld: Point
+      currentWorld: Point
+      base: readonly string[]
+    }
+  | {
+      kind: 'create'
+      type: ShapeType
+      startScreen: Point
+      startWorld: Point
+      id: string | null
+    }
+
+const DRAG_THRESHOLD = 3
+const MIN_SHAPE_SIZE = 8
+const DUPLICATE_OFFSET = 20
+
+const DEFAULT_SIZE: Record<ShapeType, { w: number; h: number }> = {
+  sticky: { w: 200, h: 200 },
+  rect: { w: 180, h: 110 },
+  ellipse: { w: 150, h: 150 },
+}
+
+const RESIZE_CURSOR: Record<Handle, string> = {
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize',
+  nw: 'nwse-resize',
+  se: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+}
+
+const newId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16)
+
+const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
+
+/**
+ * The whiteboard's interaction logic: tools, selection, camera and gestures.
+ *
+ * It knows nothing about the DOM or React. The canvas component feeds it
+ * pointer/keyboard input and draws `getRenderState()`; the toolbar reads
+ * `getState()`. That keeps every gesture testable without a browser.
+ */
+export class Editor {
+  readonly store: BoardStore
+
+  private camera: Camera = { x: 0, y: 0, zoom: 1 }
+  private viewport = { w: 0, h: 0 }
+  private tool: Tool = 'select'
+  private selection: readonly string[] = []
+  private editingId: string | null = null
+  private color: ColorName = 'yellow'
+  private spaceHeld = false
+  private interaction: Interaction = { kind: 'idle' }
+  private pointer: Point = { x: 0, y: 0 }
+  private docVersion = 0
+
+  private state: EditorState
+  private readonly listeners = new Set<() => void>()
+  private readonly unsubscribeStore: () => void
+
+  constructor(store: BoardStore) {
+    this.store = store
+    this.state = this.buildState()
+    this.unsubscribeStore = store.subscribe(() => {
+      this.docVersion++
+      // Shapes can disappear under us (deleted here or by someone else).
+      this.selection = this.selection.filter((id) => store.get(id))
+      if (this.editingId && !store.get(this.editingId)) this.editingId = null
+      this.emit()
+    })
+  }
+
+  destroy(): void {
+    this.unsubscribeStore()
+    this.listeners.clear()
+  }
+
+  // ---- State for the UI and the renderer ----
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  getState = (): EditorState => this.state
+
+  getRenderState(): RenderState {
+    const i = this.interaction
+    return {
+      shapes: this.store.list(),
+      camera: this.camera,
+      selection: this.selection,
+      marquee: i.kind === 'marquee' ? rectFromPoints(i.startWorld, i.currentWorld) : null,
+      editingId: this.editingId,
+    }
+  }
+
+  /** CSS cursor for the current tool and whatever is under the pointer. */
+  getCursor(): string {
+    const i = this.interaction
+    if (i.kind === 'pan') return 'grabbing'
+    if (i.kind === 'resize') return RESIZE_CURSOR[i.handle]
+    if (i.kind === 'move' && i.dragged) return 'move'
+    if (this.spaceHeld || this.tool === 'hand') return 'grab'
+    if (this.tool !== 'select') return 'crosshair'
+
+    const world = screenToWorld(this.camera, this.pointer)
+    const handle = this.handleUnder(world)
+    if (handle) return RESIZE_CURSOR[handle]
+    return topShapeAt(this.store.list(), world) ? 'move' : 'default'
+  }
+
+  private buildState(): EditorState {
+    return {
+      tool: this.tool,
+      selection: this.selection,
+      camera: this.camera,
+      editingId: this.editingId,
+      color: this.color,
+      docVersion: this.docVersion,
+    }
+  }
+
+  private emit(): void {
+    this.state = this.buildState()
+    for (const listener of this.listeners) listener()
+  }
+
+  // ---- Tools, colour, selection ----
+
+  setTool(tool: Tool): void {
+    this.tool = tool
+    this.editingId = null
+    if (tool !== 'select' && tool !== 'hand') this.selection = []
+    this.emit()
+  }
+
+  /** Sets the colour for new shapes and recolours the current selection. */
+  setColor(color: ColorName): void {
+    this.color = color
+    this.store.transact(() => {
+      for (const id of this.selection) this.store.update(id, { color })
+    })
+    this.emit()
+  }
+
+  selectAll(): void {
+    this.selection = this.store.list().map((s) => s.id)
+    this.emit()
+  }
+
+  /** Escape: stop editing, then drop the tool, then clear the selection. */
+  cancel(): void {
+    if (this.editingId) this.editingId = null
+    else if (this.tool !== 'select') this.tool = 'select'
+    else this.selection = []
+    this.interaction = { kind: 'idle' }
+    this.emit()
+  }
+
+  deleteSelection(): void {
+    this.store.remove(this.selection)
+  }
+
+  duplicateSelection(): void {
+    const copies: string[] = []
+    this.store.transact(() => {
+      let z = this.store.topZ()
+      for (const id of this.selection) {
+        const shape = this.store.get(id)
+        if (!shape) continue
+        const copy: Shape = {
+          ...shape,
+          id: newId(),
+          x: shape.x + DUPLICATE_OFFSET,
+          y: shape.y + DUPLICATE_OFFSET,
+          z: z++,
+        }
+        this.store.add(copy)
+        copies.push(copy.id)
+      }
+    })
+    this.selection = copies
+    this.emit()
+  }
+
+  nudgeSelection(dx: number, dy: number): void {
+    this.store.transact(() => {
+      for (const id of this.selection) {
+        const shape = this.store.get(id)
+        if (shape) this.store.update(id, { x: shape.x + dx, y: shape.y + dy })
+      }
+    })
+  }
+
+  /** Move the selection above (or below) everything else, keeping its order. */
+  reorderSelection(to: 'front' | 'back'): void {
+    const selected = new Set(this.selection)
+    const shapes = this.store.list().filter((s) => selected.has(s.id))
+    this.store.transact(() => {
+      let z = to === 'front' ? this.store.topZ() : this.store.bottomZ() - shapes.length + 1
+      for (const shape of shapes) this.store.update(shape.id, { z: z++ })
+    })
+  }
+
+  // ---- Text editing ----
+
+  startEditing(id: string): void {
+    if (!this.store.get(id)) return
+    this.selection = [id]
+    this.editingId = id
+    this.emit()
+  }
+
+  stopEditing(): void {
+    if (!this.editingId) return
+    this.editingId = null
+    this.emit()
+  }
+
+  setText(id: string, text: string): void {
+    this.store.update(id, { text })
+  }
+
+  // ---- Camera ----
+
+  setViewport(w: number, h: number): void {
+    // First layout: put the world origin in the middle of the screen.
+    if (this.viewport.w === 0 && this.viewport.h === 0 && this.camera.x === 0) {
+      this.camera = {
+        ...this.camera,
+        x: -w / 2 / this.camera.zoom,
+        y: -h / 2 / this.camera.zoom,
+      }
+    }
+    this.viewport = { w, h }
+    this.emit()
+  }
+
+  wheel(input: WheelInput): void {
+    if (input.zoom) {
+      const factor = Math.exp(-input.deltaY * 0.01)
+      this.camera = zoomAt(this.camera, input, this.camera.zoom * factor)
+    } else {
+      this.camera = {
+        ...this.camera,
+        x: this.camera.x + input.deltaX / this.camera.zoom,
+        y: this.camera.y + input.deltaY / this.camera.zoom,
+      }
+    }
+    this.emit()
+  }
+
+  /** Zoom around the centre of the viewport (toolbar buttons). */
+  setZoom(zoom: number): void {
+    const center = { x: this.viewport.w / 2, y: this.viewport.h / 2 }
+    this.camera = zoomAt(this.camera, center, clampZoom(zoom))
+    this.emit()
+  }
+
+  setSpaceHeld(held: boolean): void {
+    if (this.spaceHeld === held) return
+    this.spaceHeld = held
+    this.emit()
+  }
+
+  // ---- Pointer gestures ----
+
+  pointerDown(p: PointerInput): void {
+    this.pointer = p
+    this.editingId = null
+    const world = screenToWorld(this.camera, p)
+
+    if (p.button === 1 || (p.button === 0 && (this.spaceHeld || this.tool === 'hand'))) {
+      this.interaction = {
+        kind: 'pan',
+        startScreen: p,
+        startCamera: this.camera,
+      }
+    } else if (p.button !== 0) {
+      // Other buttons do nothing, but editing has still ended.
+    } else if (this.tool === 'select') {
+      this.beginSelectGesture(p, world)
+    } else if (this.tool !== 'hand') {
+      this.interaction = {
+        kind: 'create',
+        type: this.tool,
+        startScreen: p,
+        startWorld: world,
+        id: null,
+      }
+    }
+    this.emit()
+  }
+
+  private beginSelectGesture(p: PointerInput, world: Point): void {
+    const single = this.singleSelection()
+    const handle = this.handleUnder(world)
+    if (single && handle) {
+      this.interaction = {
+        kind: 'resize',
+        id: single.id,
+        handle,
+        startWorld: world,
+        original: { x: single.x, y: single.y, w: single.w, h: single.h },
+      }
+      return
+    }
+
+    const hit = topShapeAt(this.store.list(), world)
+    if (!hit) {
+      const base = p.shift ? this.selection : []
+      this.selection = base
+      this.interaction = {
+        kind: 'marquee',
+        startWorld: world,
+        currentWorld: world,
+        base,
+      }
+      return
+    }
+
+    const wasSelected = this.selection.includes(hit.id)
+    if (p.shift && wasSelected) {
+      this.selection = this.selection.filter((id) => id !== hit.id)
+      return
+    }
+    if (p.shift) this.selection = [...this.selection, hit.id]
+    else if (!wasSelected) this.selection = [hit.id]
+
+    const originals = new Map<string, Point>()
+    for (const id of this.selection) {
+      const shape = this.store.get(id)
+      if (shape) originals.set(id, { x: shape.x, y: shape.y })
+    }
+    this.interaction = {
+      kind: 'move',
+      startScreen: p,
+      startWorld: world,
+      originals,
+      dragged: false,
+      collapseTo: wasSelected && !p.shift ? hit.id : null,
+    }
+  }
+
+  pointerMove(p: PointerInput): void {
+    this.pointer = p
+    const world = screenToWorld(this.camera, p)
+    const i = this.interaction
+
+    switch (i.kind) {
+      case 'pan':
+        this.camera = {
+          ...i.startCamera,
+          x: i.startCamera.x - (p.x - i.startScreen.x) / i.startCamera.zoom,
+          y: i.startCamera.y - (p.y - i.startScreen.y) / i.startCamera.zoom,
+        }
+        break
+
+      case 'move': {
+        if (!i.dragged && distance(p, i.startScreen) < DRAG_THRESHOLD) return
+        i.dragged = true
+        const dx = world.x - i.startWorld.x
+        const dy = world.y - i.startWorld.y
+        this.store.transact(() => {
+          for (const [id, start] of i.originals) {
+            this.store.update(id, { x: start.x + dx, y: start.y + dy })
+          }
+        })
+        break
+      }
+
+      case 'resize':
+        this.store.update(
+          i.id,
+          resizeRect(i.original, i.handle, world.x - i.startWorld.x, world.y - i.startWorld.y, {
+            minSize: MIN_SHAPE_SIZE,
+            keepAspect: p.shift,
+          }),
+        )
+        break
+
+      case 'marquee': {
+        i.currentWorld = world
+        const area = rectFromPoints(i.startWorld, world)
+        const inside = this.store
+          .list()
+          .filter((s) => rectsIntersect(s, area) && !i.base.includes(s.id))
+          .map((s) => s.id)
+        this.selection = [...i.base, ...inside]
+        break
+      }
+
+      case 'create': {
+        const rect = rectFromPoints(i.startWorld, world)
+        if (i.id) {
+          this.store.update(i.id, rect)
+        } else if (distance(p, i.startScreen) >= DRAG_THRESHOLD) {
+          i.id = this.createShape(i.type, rect)
+        }
+        break
+      }
+
+      case 'idle':
+        break
+    }
+    this.emit()
+  }
+
+  pointerUp(p: PointerInput): void {
+    this.pointer = p
+    const i = this.interaction
+    this.interaction = { kind: 'idle' }
+
+    if (i.kind === 'move' && !i.dragged && i.collapseTo) {
+      this.selection = [i.collapseTo]
+    }
+
+    if (i.kind === 'create') {
+      if (i.id) {
+        // Dragged out: make sure it isn't too small to grab again.
+        const shape = this.store.get(i.id)
+        if (shape) {
+          this.store.update(i.id, {
+            w: Math.max(shape.w, MIN_SHAPE_SIZE),
+            h: Math.max(shape.h, MIN_SHAPE_SIZE),
+          })
+        }
+      } else {
+        // Plain click: drop a default-sized shape centred on the pointer.
+        const size = DEFAULT_SIZE[i.type]
+        const id = this.createShape(i.type, {
+          x: i.startWorld.x - size.w / 2,
+          y: i.startWorld.y - size.h / 2,
+          ...size,
+        })
+        if (i.type === 'sticky') this.editingId = id
+      }
+      this.tool = 'select'
+    }
+    this.emit()
+  }
+
+  /** Double-click: edit the shape's text, or drop a new sticky on empty space. */
+  doubleClick(p: PointerInput): void {
+    if (this.tool !== 'select') return
+    const world = screenToWorld(this.camera, p)
+    const hit = topShapeAt(this.store.list(), world)
+    if (hit) {
+      this.startEditing(hit.id)
+      return
+    }
+    const size = DEFAULT_SIZE.sticky
+    const id = this.createShape('sticky', {
+      x: world.x - size.w / 2,
+      y: world.y - size.h / 2,
+      ...size,
+    })
+    this.startEditing(id)
+  }
+
+  // ---- Helpers ----
+
+  private createShape(type: ShapeType, rect: Rect): string {
+    const id = newId()
+    this.store.add({
+      id,
+      type,
+      ...rect,
+      color: this.color,
+      text: '',
+      z: this.store.topZ(),
+    })
+    this.selection = [id]
+    return id
+  }
+
+  private singleSelection(): Shape | undefined {
+    const [id, ...rest] = this.selection
+    return id && rest.length === 0 ? this.store.get(id) : undefined
+  }
+
+  /** Resize handle of the single selected shape under `world`, if any. */
+  private handleUnder(world: Point): Handle | null {
+    const single = this.singleSelection()
+    if (!single) return null
+    return handleAt(single, world, HANDLE_SIZE / this.camera.zoom)
+  }
+}
