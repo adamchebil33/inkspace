@@ -1,20 +1,25 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { Editor } from '../board/editor'
-import { BoardStore } from '../board/store'
+import { createBoardSession } from '../board/session'
 import { BoardCanvas } from './BoardCanvas'
 import { TextEditor } from './TextEditor'
 import { Toolbar } from './Toolbar'
 import { useShortcuts } from './useShortcuts'
 import { ZoomControls } from './ZoomControls'
 
-export function Board() {
-  const [editor] = useState(() => new Editor(new BoardStore()))
+/** One board. Render with `key={boardId}` so a new id gets a fresh session. */
+export function Board({ boardId }: { boardId: string }) {
+  const [{ editor, provider }] = useState(() => createBoardSession(boardId))
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
   useShortcuts(editor)
 
-  // Handy for debugging in the browser console during development.
   useEffect(() => {
-    if (import.meta.env.DEV) Object.assign(window, { editor })
+    provider.connect()
+    return () => provider.disconnect()
+  }, [provider])
+
+  // Exposed in development for console debugging and the end-to-end tests.
+  useEffect(() => {
+    if (import.meta.env.DEV) window.editor = editor
   }, [editor])
 
   return (

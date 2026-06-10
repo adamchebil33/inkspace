@@ -9,4 +9,9 @@
     // Only /api/* reaches the Worker; everything else is served as a static file.
     "run_worker_first": ["/api/*"],
   },
+  "durable_objects": {
+    "bindings": [{ "name": "BOARD_ROOM", "class_name": "BoardRoom" }],
+  },
+  // SQLite-backed Durable Objects are the kind included in the free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BoardRoom"] }],
 }
