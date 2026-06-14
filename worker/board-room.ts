@@ -3,9 +3,9 @@ import * as decoding from 'lib0/decoding'
 import * as encoding from 'lib0/encoding'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
-import { encodeAwarenessRemoval, readAwarenessUpdate } from './awareness'
+import { encodeAwarenessRemoval, readAwarenessUpdate, type AwarenessEntry } from './awareness'
 
-// Top-level message types of the y-websocket protocol.
+// Top-level message types, shared with the client (src/board/sync-client.ts).
 const MESSAGE_SYNC = 0
 const MESSAGE_AWARENESS = 1
 const MESSAGE_QUERY_AWARENESS = 3
@@ -34,7 +34,7 @@ interface Attachment {
 /**
  * One board: the sync server and the storage for a single Yjs document.
  *
- * - Speaks the standard y-websocket protocol, so the stock client works.
+ * - Speaks the Yjs sync and awareness protocols (client: src/board/sync-client.ts).
  * - Uses the WebSocket Hibernation API: while nobody is sending anything the
  *   object is evicted from memory and costs nothing, yet sockets stay open.
  *   Anything that must outlive that (the document, per-socket data) is kept
@@ -53,6 +53,8 @@ export class BoardRoom extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS updates (id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB NOT NULL);
     `)
+    // Keep-alive pings are answered here without waking the object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
   }
 
   // ---- Connections ----
@@ -76,8 +78,9 @@ export class BoardRoom extends DurableObject<Env> {
     syncProtocol.writeSyncStep1(encoder, this.getDoc())
     server.send(encoding.toUint8Array(encoder))
 
-    // Ask one existing client to share everyone's presence with the room.
-    peers[0]?.send(new Uint8Array([MESSAGE_QUERY_AWARENESS]))
+    // Ask everyone already here to send their presence, so the newcomer
+    // sees them straight away.
+    this.send(peers, new Uint8Array([MESSAGE_QUERY_AWARENESS]))
 
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -148,37 +151,41 @@ export class BoardRoom extends DurableObject<Env> {
   }
 
   private handleAwareness(ws: WebSocket, decoder: decoding.Decoder, message: Uint8Array): void {
+    // Clients only ever send their own presence, so every entry is the sender's.
     const entries = readAwarenessUpdate(decoding.readVarUint8Array(decoder))
-
-    // A normal presence update describes only its sender. (Replies to a
-    // presence query list everyone, and say nothing about who owns what.)
-    const own = entries.length === 1 ? entries[0] : undefined
-    if (own) this.trackPresence(ws, String(own.clientId), own.clock, own.removed)
-
-    const peers = this.ctx.getWebSockets()
-    const others = peers.filter((peer) => peer !== ws)
-    // The client reconnects if it hears nothing for 30 seconds. With others
-    // around their heartbeats cover that; alone, echo its own heartbeat back.
-    this.send(others.length > 0 ? others : peers, message)
+    this.trackPresence(ws, entries)
+    this.send(
+      this.ctx.getWebSockets().filter((peer) => peer !== ws),
+      message,
+    )
   }
 
-  /** Remember which socket owns a presence id, so we can remove it on close. */
-  private trackPresence(ws: WebSocket, id: string, clock: number, removed: boolean): void {
+  /** Remember which presence ids a socket owns, so we can remove them on close. */
+  private trackPresence(ws: WebSocket, entries: AwarenessEntry[]): void {
     const attachment = this.getAttachment(ws)
-    if (!(id in attachment.clocks) && !removed) {
-      // New here. After a reconnect the old socket may still claim the id.
-      for (const peer of this.ctx.getWebSockets()) {
-        if (peer === ws) continue
-        const other = this.getAttachment(peer)
-        if (id in other.clocks) {
-          delete other.clocks[id]
-          this.setAttachment(peer, other)
-        }
+    for (const { clientId, clock, removed } of entries) {
+      const id = String(clientId)
+      if (removed) {
+        delete attachment.clocks[id]
+        continue
+      }
+      // First time this socket uses the id: after a reconnect the previous
+      // socket may still be around and claim it, so take it over.
+      if (!(id in attachment.clocks)) this.releasePresence(id, ws)
+      attachment.clocks[id] = clock
+    }
+    this.setAttachment(ws, attachment)
+  }
+
+  private releasePresence(id: string, except: WebSocket): void {
+    for (const peer of this.ctx.getWebSockets()) {
+      if (peer === except) continue
+      const attachment = this.getAttachment(peer)
+      if (id in attachment.clocks) {
+        delete attachment.clocks[id]
+        this.setAttachment(peer, attachment)
       }
     }
-    if (removed) delete attachment.clocks[id]
-    else attachment.clocks[id] = clock
-    this.setAttachment(ws, attachment)
   }
 
   private send(sockets: WebSocket[], message: Uint8Array): void {

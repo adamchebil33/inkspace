@@ -181,3 +181,92 @@ button:focus-visible {
     display: none;
   }
 }
+
+.presence {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  gap: 8px;
+}
+
+.avatars {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.avatars li + li {
+  margin-left: -6px;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.avatar.more {
+  background: var(--hover);
+  color: var(--fg);
+  cursor: default;
+}
+
+.name-input {
+  width: 150px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.name-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.connection {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+  /* Don't flash "Connecting…" on a normal, fast page load. */
+  animation: appear 0.2s ease-out 0.6s both;
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59f00;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .connection {
+    top: 64px;
+    max-width: calc(100% - 32px);
+    white-space: normal;
+  }
+}

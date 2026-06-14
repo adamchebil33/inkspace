@@ -76,17 +76,17 @@ test('edits made offline are merged after reconnecting', async ({ browser }) => 
   await addSticky(alice, 300, 300, 'Shared')
   await expect.poll(() => shapes(bob)).toHaveLength(1)
 
-  // Bob loses his connection; both keep working.
-  await bob.context().setOffline(true)
+  // Bob loses his connection; both keep working. (Playwright's offline mode
+  // leaves open WebSockets alone, so close the socket itself.)
+  await bob.evaluate(() => window.sync!.disconnect())
   await addSticky(bob, 600, 300, 'Written offline')
   await addSticky(alice, 300, 550, 'Written meanwhile')
   expect(await shapes(alice)).toHaveLength(2)
+  expect(await shapes(bob)).toHaveLength(2)
 
-  await bob.context().setOffline(false)
+  await bob.evaluate(() => window.sync!.connect())
   const expected = ['Shared', 'Written meanwhile', 'Written offline']
   for (const page of [alice, bob]) {
-    await expect
-      .poll(async () => (await shapes(page)).map((s) => s.text).sort(), { timeout: 20_000 })
-      .toEqual(expected)
+    await expect.poll(async () => (await shapes(page)).map((s) => s.text).sort()).toEqual(expected)
   }
 })

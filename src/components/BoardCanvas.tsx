@@ -1,5 +1,6 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Editor, PointerInput } from '../board/editor'
+import { CursorSmoother, type Presence } from '../board/presence'
 import { render } from '../board/render'
 import { DARK_THEME, LIGHT_THEME } from '../board/theme'
 
@@ -14,7 +15,7 @@ function toInput(e: PointerEvent | MouseEvent, canvas: HTMLCanvasElement): Point
 }
 
 /** The drawing surface: forwards input to the editor and repaints on change. */
-export function BoardCanvas({ editor }: { editor: Editor }) {
+export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Presence }) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -23,22 +24,23 @@ export function BoardCanvas({ editor }: { editor: Editor }) {
     if (!canvas || !ctx) return
 
     const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const smoother = new CursorSmoother()
     let frame = 0
 
-    const draw = () => {
-      frame = 0
-      const dpr = window.devicePixelRatio || 1
-      const view = {
-        width: canvas.clientWidth,
-        height: canvas.clientHeight,
-        dpr,
-      }
-      render(ctx, view, editor.getRenderState(), darkQuery.matches ? DARK_THEME : LIGHT_THEME)
-      canvas.style.cursor = editor.getCursor()
-    }
     // Any number of changes within a frame cause a single repaint.
     const schedule = () => {
       frame ||= requestAnimationFrame(draw)
+    }
+    const draw = (now: number) => {
+      frame = 0
+      const dpr = window.devicePixelRatio || 1
+      const view = { width: canvas.clientWidth, height: canvas.clientHeight, dpr }
+      const { peers, animating } = smoother.step(presence.getState().peers, now)
+      const theme = darkQuery.matches ? DARK_THEME : LIGHT_THEME
+      render(ctx, view, { ...editor.getRenderState(), peers }, theme)
+      canvas.style.cursor = editor.getCursor()
+      // Keep animating until every remote cursor has caught up.
+      if (animating) schedule()
     }
 
     const resize = () => {
@@ -68,6 +70,7 @@ export function BoardCanvas({ editor }: { editor: Editor }) {
     canvas.addEventListener('wheel', onWheel, { passive: false })
 
     const unsubscribe = editor.subscribe(schedule)
+    const unsubscribePresence = presence.subscribe(schedule)
     darkQuery.addEventListener('change', schedule)
 
     return () => {
@@ -75,9 +78,10 @@ export function BoardCanvas({ editor }: { editor: Editor }) {
       observer.disconnect()
       canvas.removeEventListener('wheel', onWheel)
       unsubscribe()
+      unsubscribePresence()
       darkQuery.removeEventListener('change', schedule)
     }
-  }, [editor])
+  }, [editor, presence])
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -92,6 +96,7 @@ export function BoardCanvas({ editor }: { editor: Editor }) {
       onPointerMove={(e) => editor.pointerMove(toInput(e.nativeEvent, e.currentTarget))}
       onPointerUp={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
       onPointerCancel={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
+      onPointerLeave={() => editor.pointerLeave()}
       onDoubleClick={(e) => editor.doubleClick(toInput(e.nativeEvent, e.currentTarget))}
       // Stops middle-click autoscroll and the context menu on the board.
       onMouseDown={(e) => e.button === 1 && e.preventDefault()}

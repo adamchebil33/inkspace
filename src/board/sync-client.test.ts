@@ -1,0 +1,187 @@
+import * as decoding from 'lib0/decoding'
+import * as encoding from 'lib0/encoding'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as syncProtocol from 'y-protocols/sync'
+import * as Y from 'yjs'
+import { SyncClient } from './sync-client'
+
+/** Stands in for the browser WebSocket and records what the client sends. */
+class FakeSocket {
+  static readonly OPEN = 1
+  static instances: FakeSocket[] = []
+
+  readyState = 0
+  binaryType = ''
+  sent: (Uint8Array | string)[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: ArrayBuffer | string }) => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor(readonly url: string) {
+    FakeSocket.instances.push(this)
+  }
+
+  send(data: Uint8Array | string) {
+    this.sent.push(data)
+  }
+
+  close() {
+    this.readyState = 3
+    this.onclose?.()
+  }
+
+  // Test helpers.
+  open() {
+    this.readyState = FakeSocket.OPEN
+    this.onopen?.()
+  }
+
+  receive(message: Uint8Array) {
+    this.onmessage?.({ data: message.slice().buffer })
+  }
+
+  /** Message type bytes of everything sent as binary. */
+  sentTypes() {
+    return this.sent.filter((m) => typeof m !== 'string').map((m) => (m as Uint8Array)[0])
+  }
+}
+
+const SYNC = 0
+const AWARENESS = 1
+const QUERY_AWARENESS = 3
+
+function updateMessage(update: Uint8Array): Uint8Array {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, SYNC)
+  syncProtocol.writeUpdate(encoder, update)
+  return encoding.toUint8Array(encoder)
+}
+
+function makeClient() {
+  const doc = new Y.Doc()
+  const client = new SyncClient('ws://test/board', doc, {
+    WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+  })
+  client.awareness.setLocalState({ user: 'me' })
+  return { doc, client }
+}
+
+const lastSocket = () => FakeSocket.instances[FakeSocket.instances.length - 1]!
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  FakeSocket.instances = []
+})
+afterEach(() => vi.useRealTimers())
+
+describe('SyncClient', () => {
+  it('announces its state and presence when the connection opens', () => {
+    const { client } = makeClient()
+    client.connect()
+    expect(client.getStatus()).toBe('connecting')
+
+    lastSocket().open()
+    expect(client.getStatus()).toBe('connected')
+    expect(lastSocket().sentTypes()).toEqual([SYNC, AWARENESS])
+  })
+
+  it('sends local edits and applies remote ones without echoing them back', () => {
+    const { doc, client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    socket.sent = []
+
+    doc.getMap('shapes').set('local', 1)
+    expect(socket.sentTypes()).toEqual([SYNC])
+
+    const remote = new Y.Doc()
+    remote.getMap('shapes').set('remote', 2)
+    socket.sent = []
+    socket.receive(updateMessage(Y.encodeStateAsUpdate(remote)))
+
+    expect(doc.getMap('shapes').get('remote')).toBe(2)
+    expect(socket.sent).toEqual([])
+  })
+
+  it('answers the server asking what it is missing', () => {
+    const { doc, client } = makeClient()
+    doc.getMap('shapes').set('mine', 1)
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    socket.sent = []
+
+    // Sync step 1 from a server that has nothing.
+    const encoder = encoding.createEncoder()
+    encoding.writeVarUint(encoder, SYNC)
+    syncProtocol.writeSyncStep1(encoder, new Y.Doc())
+    socket.receive(encoding.toUint8Array(encoder))
+
+    // The reply is sync step 2 carrying our whole document.
+    const reply = socket.sent[0] as Uint8Array
+    const decoder = decoding.createDecoder(reply)
+    expect(decoding.readVarUint(decoder)).toBe(SYNC)
+    const server = new Y.Doc()
+    syncProtocol.readSyncMessage(decoder, encoding.createEncoder(), server, null)
+    expect(server.getMap('shapes').get('mine')).toBe(1)
+  })
+
+  it('sends only its own presence, also when asked', () => {
+    const { client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    socket.sent = []
+
+    client.awareness.setLocalStateField('cursor', { x: 1, y: 2 })
+    socket.receive(new Uint8Array([QUERY_AWARENESS]))
+    expect(socket.sentTypes()).toEqual([AWARENESS, AWARENESS])
+  })
+
+  it('reconnects with backoff and resyncs after the connection drops', () => {
+    const { doc, client } = makeClient()
+    client.connect()
+    lastSocket().open()
+
+    lastSocket().close()
+    expect(client.getStatus()).toBe('disconnected')
+    expect(FakeSocket.instances).toHaveLength(1)
+
+    // Edits made while offline are simply kept in the document.
+    doc.getMap('shapes').set('offline', 1)
+
+    vi.advanceTimersByTime(1000)
+    expect(FakeSocket.instances).toHaveLength(2)
+    expect(client.getStatus()).toBe('connecting')
+
+    lastSocket().open()
+    expect(client.getStatus()).toBe('connected')
+    expect(lastSocket().sentTypes()).toEqual([SYNC, AWARENESS])
+  })
+
+  it('stays disconnected after disconnect()', () => {
+    const { client } = makeClient()
+    client.connect()
+    lastSocket().open()
+    client.disconnect()
+
+    vi.advanceTimersByTime(60_000)
+    expect(FakeSocket.instances).toHaveLength(1)
+    expect(client.getStatus()).toBe('disconnected')
+  })
+
+  it('closes a connection that has gone silent', () => {
+    const { client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+
+    vi.advanceTimersByTime(20_000)
+    expect(socket.sent).toContain('ping')
+
+    // No pong ever arrives.
+    vi.advanceTimersByTime(60_000)
+    expect(socket.readyState).toBe(3)
+  })
+})

@@ -121,6 +121,7 @@ export class Editor {
   private spaceHeld = false
   private interaction: Interaction = { kind: 'idle' }
   private pointer: Point = { x: 0, y: 0 }
+  private pointerInside = false
   private docVersion = 0
 
   private state: EditorState
@@ -153,7 +154,8 @@ export class Editor {
 
   getState = (): EditorState => this.state
 
-  getRenderState(): RenderState {
+  /** What to draw, apart from other people (the canvas adds those). */
+  getRenderState(): Omit<RenderState, 'peers'> {
     const i = this.interaction
     return {
       shapes: this.store.list(),
@@ -327,6 +329,26 @@ export class Editor {
     this.emit()
   }
 
+  /** Centre the view on a world point, e.g. to jump to someone's cursor. */
+  centerOn(world: Point): void {
+    this.camera = {
+      ...this.camera,
+      x: world.x - this.viewport.w / 2 / this.camera.zoom,
+      y: world.y - this.viewport.h / 2 / this.camera.zoom,
+    }
+    this.emit()
+  }
+
+  /** World position under the pointer, or null when it is off the board. */
+  getPointerWorld(): Point | null {
+    return this.pointerInside ? screenToWorld(this.camera, this.pointer) : null
+  }
+
+  pointerLeave(): void {
+    this.pointerInside = false
+    this.emit()
+  }
+
   setSpaceHeld(held: boolean): void {
     if (this.spaceHeld === held) return
     this.spaceHeld = held
@@ -337,6 +359,7 @@ export class Editor {
 
   pointerDown(p: PointerInput): void {
     this.pointer = p
+    this.pointerInside = true
     this.editingId = null
     const world = screenToWorld(this.camera, p)
 
@@ -414,6 +437,7 @@ export class Editor {
 
   pointerMove(p: PointerInput): void {
     this.pointer = p
+    this.pointerInside = true
     const world = screenToWorld(this.camera, p)
     const i = this.interaction
 
@@ -427,7 +451,7 @@ export class Editor {
         break
 
       case 'move': {
-        if (!i.dragged && distance(p, i.startScreen) < DRAG_THRESHOLD) return
+        if (!i.dragged && distance(p, i.startScreen) < DRAG_THRESHOLD) break
         i.dragged = true
         const dx = world.x - i.startWorld.x
         const dy = world.y - i.startWorld.y

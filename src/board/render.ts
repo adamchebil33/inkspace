@@ -1,5 +1,14 @@
-import { HANDLES, handlePoint, rectsIntersect, type Camera, type Rect } from './geometry'
-import { FONT, LINE_HEIGHT, textWidth, wrapText } from './text'
+import {
+  HANDLES,
+  handlePoint,
+  rectsIntersect,
+  worldToScreen,
+  type Camera,
+  type Point,
+  type Rect,
+} from './geometry'
+import type { Peer } from './presence'
+import { FONT, FONT_FAMILY, LINE_HEIGHT, textWidth, wrapText } from './text'
 import { PALETTE, SHAPE_TEXT_COLOR, type Theme } from './theme'
 import type { Shape } from './types'
 
@@ -10,6 +19,8 @@ export interface RenderState {
   marquee: Rect | null
   /** Shape whose text is being edited in the HTML overlay (not drawn here). */
   editingId: string | null
+  /** Other people on the board: their cursors and what they have selected. */
+  peers: readonly Peer[]
 }
 
 export interface Viewport {
@@ -52,6 +63,7 @@ export function render(
     if (shape.text && shape.id !== state.editingId) drawText(ctx, shape)
   }
 
+  drawPeerSelections(ctx, state)
   drawSelection(ctx, state, theme)
 
   if (state.marquee) {
@@ -62,6 +74,57 @@ export function render(
     ctx.lineWidth = 1 / zoom
     ctx.strokeRect(m.x, m.y, m.w, m.h)
   }
+
+  // Cursors stay the same size at any zoom, so draw them in screen pixels.
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  for (const peer of state.peers) {
+    if (peer.cursor) drawCursor(ctx, worldToScreen(camera, peer.cursor), peer)
+  }
+}
+
+/** Outline what each other person has selected, in their colour. */
+function drawPeerSelections(ctx: CanvasRenderingContext2D, state: RenderState) {
+  const colorById = new Map<string, string>()
+  for (const peer of state.peers) {
+    for (const id of peer.selection) colorById.set(id, peer.color)
+  }
+  if (colorById.size === 0) return
+
+  ctx.lineWidth = 2 / state.camera.zoom
+  for (const shape of state.shapes) {
+    const color = colorById.get(shape.id)
+    if (!color) continue
+    ctx.strokeStyle = color
+    ctx.strokeRect(shape.x, shape.y, shape.w, shape.h)
+  }
+}
+
+function drawCursor(ctx: CanvasRenderingContext2D, at: Point, peer: Peer) {
+  // Arrow with its tip exactly on the pointer position.
+  ctx.beginPath()
+  ctx.moveTo(at.x, at.y)
+  ctx.lineTo(at.x, at.y + 17)
+  ctx.lineTo(at.x + 4.6, at.y + 12.6)
+  ctx.lineTo(at.x + 11.5, at.y + 12.6)
+  ctx.closePath()
+  ctx.fillStyle = peer.color
+  ctx.fill()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 1.5
+  ctx.lineJoin = 'round'
+  ctx.stroke()
+
+  // Name tag.
+  ctx.font = `500 12px ${FONT_FAMILY}`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  const width = ctx.measureText(peer.name).width + 12
+  ctx.beginPath()
+  ctx.roundRect(at.x + 12, at.y + 16, width, 20, 6)
+  ctx.fillStyle = peer.color
+  ctx.fill()
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(peer.name, at.x + 18, at.y + 26.5)
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, view: Viewport, camera: Camera, theme: Theme) {
