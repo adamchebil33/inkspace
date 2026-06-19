@@ -80,7 +80,32 @@ export function unionRects(rects: readonly Rect[]): Rect | null {
   return { x: left, y: top, w: right - left, h: bottom - top }
 }
 
-export function hitTest(shape: Rect & { type: string }, p: Point): boolean {
+interface Hittable extends Rect {
+  type: string
+  points?: readonly number[]
+  flipX?: boolean
+  flipY?: boolean
+}
+
+/**
+ * Is `p` on the shape? `tolerance` is how far off a thin line (pen stroke or
+ * arrow) still counts, so they stay easy to grab at any zoom.
+ */
+export function hitTest(shape: Hittable, p: Point, tolerance = 0): boolean {
+  if (shape.type === 'arrow') {
+    const { start, end } = arrowEnds(shape)
+    return distanceToSegment(p, start, end) <= tolerance
+  }
+
+  if (shape.type === 'pen' && shape.points) {
+    // The stroke is stored unscaled; map the point into its coordinates.
+    const natural = pointsSize(shape.points)
+    const sx = shape.w / Math.max(natural.w, 1)
+    const sy = shape.h / Math.max(natural.h, 1)
+    const local = { x: (p.x - shape.x) / sx, y: (p.y - shape.y) / sy }
+    return distanceToPolyline(local, shape.points) <= tolerance / Math.min(sx, sy)
+  }
+
   if (!rectContains(shape, p)) return false
   if (shape.type !== 'ellipse') return true
   const rx = shape.w / 2
@@ -92,13 +117,14 @@ export function hitTest(shape: Rect & { type: string }, p: Point): boolean {
 }
 
 /** `shapes` must be in draw order (bottom first); returns the topmost hit. */
-export function topShapeAt<T extends Rect & { type: string }>(
+export function topShapeAt<T extends Hittable>(
   shapes: readonly T[],
   p: Point,
+  tolerance = 0,
 ): T | undefined {
   for (let i = shapes.length - 1; i >= 0; i--) {
     const shape = shapes[i]!
-    if (hitTest(shape, p)) return shape
+    if (hitTest(shape, p, tolerance)) return shape
   }
   return undefined
 }
@@ -113,8 +139,21 @@ export function handlePoint(r: Rect, handle: Handle): Point {
   return { x, y }
 }
 
-export function handleAt(r: Rect, p: Point, tolerance: number): Handle | null {
-  for (const handle of HANDLES) {
+/** Which resize handles a shape type offers. */
+export function handlesFor(type: string): readonly Handle[] {
+  // Arrows are edited by their two ends; text scales from its corners only.
+  if (type === 'arrow') return []
+  if (type === 'text') return ['nw', 'ne', 'se', 'sw']
+  return HANDLES
+}
+
+export function handleAt(
+  r: Rect,
+  p: Point,
+  tolerance: number,
+  handles: readonly Handle[] = HANDLES,
+): Handle | null {
+  for (const handle of handles) {
     const h = handlePoint(r, handle)
     if (Math.abs(p.x - h.x) <= tolerance && Math.abs(p.y - h.y) <= tolerance) return handle
   }
@@ -160,4 +199,100 @@ export function resizeRect(
   }
 
   return { x: left, y: top, w: right - left, h: bottom - top }
+}
+
+// ---- Lines: pen strokes and arrows ----
+
+export function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lengthSq = dx * dx + dy * dy
+  // Project p onto the segment, clamped to its ends.
+  const t = lengthSq === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq
+  const clamped = Math.max(0, Math.min(1, t))
+  return Math.hypot(p.x - (a.x + clamped * dx), p.y - (a.y + clamped * dy))
+}
+
+/** Distance from `p` to a polyline given as flat x, y pairs. */
+export function distanceToPolyline(p: Point, points: readonly number[]): number {
+  if (points.length < 2) return Infinity
+  let best = Math.hypot(p.x - points[0]!, p.y - points[1]!)
+  for (let i = 2; i + 1 < points.length; i += 2) {
+    const a = { x: points[i - 2]!, y: points[i - 1]! }
+    const b = { x: points[i]!, y: points[i + 1]! }
+    best = Math.min(best, distanceToSegment(p, a, b))
+  }
+  return best
+}
+
+/** Width and height spanned by flat x, y pairs that start at the origin. */
+export function pointsSize(points: readonly number[]): { w: number; h: number } {
+  let w = 0
+  let h = 0
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    w = Math.max(w, points[i]!)
+    h = Math.max(h, points[i + 1]!)
+  }
+  return { w, h }
+}
+
+/**
+ * Ramer-Douglas-Peucker: drop points that lie within `tolerance` of the line
+ * through their neighbours. A mouse stroke shrinks to a fraction of its raw
+ * points with no visible change, which keeps the shared document small.
+ */
+export function simplifyPoints(points: readonly number[], tolerance: number): number[] {
+  const count = points.length / 2
+  if (count <= 2) return [...points]
+
+  const keep = new Uint8Array(count)
+  keep[0] = 1
+  keep[count - 1] = 1
+  const stack: [number, number][] = [[0, count - 1]]
+  while (stack.length > 0) {
+    const [first, last] = stack.pop()!
+    const a = { x: points[first * 2]!, y: points[first * 2 + 1]! }
+    const b = { x: points[last * 2]!, y: points[last * 2 + 1]! }
+    let worst = 0
+    let index = -1
+    for (let i = first + 1; i < last; i++) {
+      const d = distanceToSegment({ x: points[i * 2]!, y: points[i * 2 + 1]! }, a, b)
+      if (d > worst) {
+        worst = d
+        index = i
+      }
+    }
+    if (index !== -1 && worst > tolerance) {
+      keep[index] = 1
+      stack.push([first, index], [index, last])
+    }
+  }
+
+  const out: number[] = []
+  for (let i = 0; i < count; i++) {
+    if (keep[i]) out.push(points[i * 2]!, points[i * 2 + 1]!)
+  }
+  return out
+}
+
+interface ArrowBox extends Rect {
+  flipX?: boolean
+  flipY?: boolean
+}
+
+/** Where an arrow starts and where its head is. */
+export function arrowEnds(arrow: ArrowBox): { start: Point; end: Point } {
+  const left = arrow.x
+  const right = arrow.x + arrow.w
+  const top = arrow.y
+  const bottom = arrow.y + arrow.h
+  return {
+    start: { x: arrow.flipX ? right : left, y: arrow.flipY ? bottom : top },
+    end: { x: arrow.flipX ? left : right, y: arrow.flipY ? top : bottom },
+  }
+}
+
+/** The bounding box and flips for an arrow from `start` to `end`. */
+export function arrowFromEnds(start: Point, end: Point): Required<ArrowBox> {
+  return { ...rectFromPoints(start, end), flipX: start.x > end.x, flipY: start.y > end.y }
 }

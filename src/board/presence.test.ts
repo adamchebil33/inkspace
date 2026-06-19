@@ -69,6 +69,28 @@ describe('Presence', () => {
     expect(updates).toBe(2)
   })
 
+  it('shares a pen stroke while it is being drawn, then clears it', () => {
+    const [a, b] = connectedPair()
+    const adaPresence = new Presence(a, ada)
+    const bobPresence = new Presence(b, bob)
+    const points = [0, 0, 10.4, 5.6]
+
+    adaPresence.setDraft({ color: 'red', points })
+    adaPresence.setCursor({ x: 10.4, y: 5.6 })
+    expect(bobPresence.getState().peers[0]?.draft).toEqual({
+      color: 'red',
+      points: [0, 0, 10, 6],
+    })
+
+    // The stroke grows in place; the next tick picks up the new points.
+    points.push(20, 20)
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS)
+    expect(bobPresence.getState().peers[0]?.draft?.points).toHaveLength(6)
+
+    adaPresence.setDraft(null)
+    expect(bobPresence.getState().peers[0]?.draft).toBeNull()
+  })
+
   it('removes people when they leave', () => {
     const [a, b] = connectedPair()
     new Presence(a, ada)
@@ -87,12 +109,20 @@ describe('parsePeer', () => {
 
   it('tolerates a bad cursor or selection', () => {
     const peer = parsePeer(1, { user: ada, cursor: { x: 'NaN' }, selection: 'nope' })
-    expect(peer).toMatchObject({ name: 'Ada', cursor: null, selection: [] })
+    expect(peer).toMatchObject({ name: 'Ada', cursor: null, selection: [], draft: null })
+    expect(parsePeer(1, { user: ada, draft: { color: 'nope', points: [0, 0] } })?.draft).toBeNull()
+    expect(parsePeer(1, { user: ada, draft: { color: 'red', points: [0, 'x'] } })?.draft).toBeNull()
   })
 })
 
 describe('CursorSmoother', () => {
-  const peer = (x: number): Peer => ({ id: 1, ...ada, cursor: { x, y: 0 }, selection: [] })
+  const peer = (x: number): Peer => ({
+    id: 1,
+    ...ada,
+    cursor: { x, y: 0 },
+    selection: [],
+    draft: null,
+  })
 
   it('snaps to the first position, then eases toward new ones', () => {
     const smoother = new CursorSmoother()

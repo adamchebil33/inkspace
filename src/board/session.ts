@@ -1,5 +1,6 @@
 import * as Y from 'yjs'
 import { loadUser } from '../lib/identity'
+import { measureText } from '../lib/measure'
 import { Editor } from './editor'
 import { Presence } from './presence'
 import { BoardStore } from './store'
@@ -20,16 +21,17 @@ export interface BoardSession {
  */
 export function createBoardSession(boardId: string): BoardSession {
   const doc = new Y.Doc()
-  const editor = new Editor(new BoardStore(doc))
+  const editor = new Editor(new BoardStore(doc), { measureText })
 
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
   const sync = new SyncClient(`${scheme}://${location.host}/api/ws/${boardId}`, doc)
 
-  // Share our cursor and selection. Presence drops repeats and throttles the
+  // Share our cursor, selection and any pen stroke in progress. Presence drops repeats and throttles the
   // cursor, so it is fine to call this on every editor change (including
   // pans and zooms, which move the world under a still pointer).
   const presence = new Presence(sync.awareness, loadUser())
   editor.subscribe(() => {
+    presence.setDraft(editor.getDraft())
     presence.setCursor(editor.getPointerWorld())
     presence.setSelection(editor.getState().selection)
   })

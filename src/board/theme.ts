@@ -6,6 +6,8 @@ export interface Theme {
   accent: string
   marqueeFill: string
   handleFill: string
+  /** Default colour for pen, arrows and text: dark on light, light on dark. */
+  ink: string
 }
 
 export const LIGHT_THEME: Theme = {
@@ -14,6 +16,7 @@ export const LIGHT_THEME: Theme = {
   accent: '#4f46e5',
   marqueeFill: 'rgba(79, 70, 229, 0.08)',
   handleFill: '#ffffff',
+  ink: '#1c1c1a',
 }
 
 export const DARK_THEME: Theme = {
@@ -22,6 +25,7 @@ export const DARK_THEME: Theme = {
   accent: '#818cf8',
   marqueeFill: 'rgba(129, 140, 248, 0.12)',
   handleFill: '#161618',
+  ink: '#ededeb',
 }
 
 /** Shapes keep the same colours in both themes, like paper on a dark desk. */
@@ -37,3 +41,8 @@ export const PALETTE: Record<ColorName, { fill: string; stroke: string }> = {
 }
 
 export const SHAPE_TEXT_COLOR = '#1c1c1a'
+
+/** Line colour for pen strokes, arrows and text. Gray means "default ink". */
+export function inkColor(color: ColorName, theme: Theme): string {
+  return color === 'gray' ? theme.ink : PALETTE[color].stroke
+}

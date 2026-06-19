@@ -1,6 +1,7 @@
 import type { Awareness } from 'y-protocols/awareness'
 import { MAX_NAME_LENGTH, type UserInfo } from '../lib/identity'
-import type { Point } from './geometry'
+import { simplifyPoints, type Point } from './geometry'
+import { COLORS, type ColorName } from './types'
 
 /** Someone else on the board, as read from their shared presence state. */
 export interface Peer {
@@ -10,6 +11,14 @@ export interface Peer {
   /** World position of their pointer, or null when it is off the board. */
   cursor: Point | null
   selection: readonly string[]
+  /** The pen stroke they are drawing right now, before it is saved. */
+  draft: Draft | null
+}
+
+/** A pen stroke in progress, as flat x, y pairs in world coordinates. */
+export interface Draft {
+  color: ColorName
+  points: readonly number[]
 }
 
 export interface PresenceState {
@@ -22,6 +31,19 @@ export const CURSOR_INTERVAL_MS = 50
 
 const COLOR = /^#[0-9a-f]{6}$/i
 const MAX_SELECTION = 200
+/** Longer strokes are simplified before sharing, to keep messages small. */
+const MAX_DRAFT_VALUES = 800
+
+function parseDraft(value: unknown): Draft | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { color, points } = value as Record<string, unknown>
+  if (!COLORS.includes(color as ColorName) || !Array.isArray(points)) return null
+  if (points.length < 2 || points.length % 2 !== 0 || points.length > MAX_DRAFT_VALUES * 4) {
+    return null
+  }
+  if (!points.every((v) => typeof v === 'number' && Number.isFinite(v))) return null
+  return { color: color as ColorName, points: points as number[] }
+}
 
 const isPoint = (v: unknown): v is Point =>
   typeof v === 'object' &&
@@ -32,7 +54,7 @@ const isPoint = (v: unknown): v is Point =>
 /** Presence is written by other clients, so validate it like any input. */
 export function parsePeer(id: number, state: unknown): Peer | null {
   if (typeof state !== 'object' || state === null) return null
-  const { user, cursor, selection } = state as Record<string, unknown>
+  const { user, cursor, selection, draft } = state as Record<string, unknown>
   if (typeof user !== 'object' || user === null) return null
   const { name, color } = user as Record<string, unknown>
   if (typeof name !== 'string' || typeof color !== 'string' || !COLOR.test(color)) return null
@@ -45,6 +67,7 @@ export function parsePeer(id: number, state: unknown): Peer | null {
     selection: Array.isArray(selection)
       ? selection.filter((s): s is string => typeof s === 'string').slice(0, MAX_SELECTION)
       : [],
+    draft: parseDraft(draft),
   }
 }
 
@@ -61,11 +84,13 @@ export class Presence {
   private sentCursor: Point | null = null
   private cursorTimer: ReturnType<typeof setTimeout> | null = null
   private selectionKey = ''
+  private draft: Draft | null = null
+  private sentDraftLength = 0
 
   constructor(awareness: Awareness, user: UserInfo) {
     this.awareness = awareness
     this.state = { user, peers: this.readPeers() }
-    awareness.setLocalState({ user, cursor: null, selection: [] })
+    awareness.setLocalState({ user, cursor: null, selection: [], draft: null })
     awareness.on('change', this.handleChange)
   }
 
@@ -110,6 +135,25 @@ export class Presence {
     this.awareness.setLocalStateField('selection', selection.slice(0, MAX_SELECTION))
   }
 
+  /** Share the stroke being drawn. Sent together with the cursor. */
+  setDraft(draft: Draft | null): void {
+    this.draft = draft
+    if (!draft && this.sentDraftLength > 0) this.sendDraft()
+  }
+
+  private sendDraft(): void {
+    const length = this.draft?.points.length ?? 0
+    if (length === this.sentDraftLength) return
+    this.sentDraftLength = length
+    if (!this.draft) {
+      this.awareness.setLocalStateField('draft', null)
+      return
+    }
+    const { color, points } = this.draft
+    const compact = length > MAX_DRAFT_VALUES ? simplifyPoints(points, 2) : points
+    this.awareness.setLocalStateField('draft', { color, points: compact.map(Math.round) })
+  }
+
   /**
    * Share the pointer position. The first move goes out at once; after that
    * at most one update per interval, always ending on the latest position.
@@ -120,11 +164,13 @@ export class Presence {
     this.sendCursor()
     this.cursorTimer = setTimeout(() => {
       this.cursorTimer = null
-      if (!samePoint(this.cursor, this.sentCursor)) this.setCursor(this.cursor)
+      const draftGrew = (this.draft?.points.length ?? 0) !== this.sentDraftLength
+      if (draftGrew || !samePoint(this.cursor, this.sentCursor)) this.setCursor(this.cursor)
     }, CURSOR_INTERVAL_MS)
   }
 
   private sendCursor(): void {
+    this.sendDraft()
     if (samePoint(this.cursor, this.sentCursor)) return
     this.sentCursor = this.cursor
     // One decimal place is plenty and keeps the messages small.

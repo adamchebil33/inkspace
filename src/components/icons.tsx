@@ -51,3 +51,39 @@ export const EllipseIcon = () => (
     <circle cx="12" cy="12" r="9" />
   </Icon>
 )
+
+export const PenIcon = () => (
+  <Icon>
+    <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+    <path d="m15 5 4 4" />
+  </Icon>
+)
+
+export const ArrowIcon = () => (
+  <Icon>
+    <path d="M7 7h10v10" />
+    <path d="M7 17 17 7" />
+  </Icon>
+)
+
+export const TextIcon = () => (
+  <Icon>
+    <path d="M12 4v16" />
+    <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" />
+    <path d="M9 20h6" />
+  </Icon>
+)
+
+export const UndoIcon = () => (
+  <Icon>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+  </Icon>
+)
+
+export const RedoIcon = () => (
+  <Icon>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />
+  </Icon>
+)

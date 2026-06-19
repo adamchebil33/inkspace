@@ -1,20 +1,13 @@
+import type { CSSProperties } from 'react'
 import type { Editor, EditorState } from '../board/editor'
 import { worldToScreen } from '../board/geometry'
-import { FONT, FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, textWidth, wrapText } from '../board/text'
-import { SHAPE_TEXT_COLOR } from '../board/theme'
+import { FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, textScale, textWidth, wrapText } from '../board/text'
+import { PALETTE, SHAPE_TEXT_COLOR } from '../board/theme'
+import { measureText } from '../lib/measure'
 
 interface Props {
   editor: Editor
   state: EditorState
-}
-
-let measureCtx: CanvasRenderingContext2D | null = null
-
-function measure(text: string): number {
-  measureCtx ??= document.createElement('canvas').getContext('2d')
-  if (!measureCtx) return 0
-  measureCtx.font = FONT
-  return measureCtx.measureText(text).width
 }
 
 /**
@@ -27,12 +20,37 @@ export function TextEditor({ editor, state }: Props) {
 
   const { zoom } = state.camera
   const topLeft = worldToScreen(state.camera, shape)
-  const width = textWidth(shape)
-  const sidePadding = (shape.w - width) / 2
+  let style: CSSProperties
 
-  // Canvas text is vertically centred; pad the textarea to match.
-  const lineCount = wrapText(shape.text, width, measure).length
-  const topPadding = Math.max(0, (shape.h - lineCount * LINE_HEIGHT) / 2)
+  if (shape.type === 'text') {
+    // Free text: left-aligned, no wrapping, growing as you type.
+    const scale = textScale(shape) * zoom
+    style = {
+      left: topLeft.x,
+      top: topLeft.y,
+      width: shape.w * zoom + FONT_SIZE * scale * 2,
+      height: shape.h * zoom,
+      font: `${FONT_SIZE * scale}px/${LINE_HEIGHT * scale}px ${FONT_FAMILY}`,
+      color: shape.color === 'gray' ? 'var(--fg)' : PALETTE[shape.color].stroke,
+      textAlign: 'left',
+      whiteSpace: 'pre',
+    }
+  } else {
+    // Text in a box is centred both ways; pad the textarea to match the canvas.
+    const width = textWidth(shape)
+    const sidePadding = (shape.w - width) / 2
+    const lineCount = wrapText(shape.text, width, measureText).length
+    const topPadding = Math.max(0, (shape.h - lineCount * LINE_HEIGHT) / 2)
+    style = {
+      left: topLeft.x,
+      top: topLeft.y,
+      width: shape.w * zoom,
+      height: shape.h * zoom,
+      padding: `${topPadding * zoom}px ${sidePadding * zoom}px 0`,
+      font: `${FONT_SIZE * zoom}px/${LINE_HEIGHT * zoom}px ${FONT_FAMILY}`,
+      color: SHAPE_TEXT_COLOR,
+    }
+  }
 
   return (
     <textarea
@@ -42,15 +60,7 @@ export function TextEditor({ editor, state }: Props) {
       autoFocus
       value={shape.text}
       placeholder={shape.type === 'sticky' ? 'Type something' : ''}
-      style={{
-        left: topLeft.x,
-        top: topLeft.y,
-        width: shape.w * zoom,
-        height: shape.h * zoom,
-        padding: `${topPadding * zoom}px ${sidePadding * zoom}px 0`,
-        font: `${FONT_SIZE * zoom}px/${LINE_HEIGHT * zoom}px ${FONT_FAMILY}`,
-        color: SHAPE_TEXT_COLOR,
-      }}
+      style={style}
       onChange={(e) => editor.setText(shape.id, e.target.value)}
       onFocus={(e) => {
         const end = e.target.value.length

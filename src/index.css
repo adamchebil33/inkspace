@@ -270,3 +270,25 @@ button:focus-visible {
     white-space: normal;
   }
 }
+
+.history {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+}
+
+.tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tool:disabled:hover {
+  background: transparent;
+}
+
+@media (max-width: 480px) {
+  .tool {
+    width: 36px;
+    height: 36px;
+  }
+}

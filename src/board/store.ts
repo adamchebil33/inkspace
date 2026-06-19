@@ -1,9 +1,11 @@
 import * as Y from 'yjs'
 import { COLORS, SHAPE_TYPES, type ColorName, type Shape, type ShapeType } from './types'
 
-export type ShapePatch = Partial<Omit<Shape, 'id' | 'type'>>
+export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points'>>
 
 const MAX_TEXT_LENGTH = 5000
+/** Edits closer together than this merge into one undo step. */
+const UNDO_MERGE_MS = 600
 
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -26,7 +28,7 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
   if (!isNumber(x) || !isNumber(y) || !isNumber(w) || !isNumber(h) || !isNumber(z)) return null
   if (w < 0 || h < 0) return null
 
-  return {
+  const shape: Shape = {
     id,
     type: type as ShapeType,
     color: color as ColorName,
@@ -37,6 +39,39 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
     h,
     z,
   }
+
+  if (shape.type === 'pen') {
+    const points = decodePoints(map.get('points'))
+    if (!points) return null
+    shape.points = points
+  }
+  if (shape.type === 'arrow') {
+    shape.flipX = map.get('flipX') === true
+    shape.flipY = map.get('flipY') === true
+  }
+  return shape
+}
+
+// Pen points are stored as integers in tenths of a unit: integers encode in
+// 1-3 bytes each, where fractional numbers would take 9.
+const POINT_SCALE = 10
+const MAX_POINT_VALUES = 20_000
+
+export const encodePoints = (points: readonly number[]): number[] =>
+  points.map((v) => Math.round(v * POINT_SCALE))
+
+/** Decoded once per stored array, so shapes keep a stable `points` identity. */
+const decodedPoints = new WeakMap<object, readonly number[]>()
+
+function decodePoints(raw: unknown): readonly number[] | null {
+  if (!Array.isArray(raw)) return null
+  const cached = decodedPoints.get(raw)
+  if (cached) return cached
+  if (raw.length < 4 || raw.length % 2 !== 0 || raw.length > MAX_POINT_VALUES) return null
+  if (!raw.every(isNumber)) return null
+  const points = raw.map((v) => v / POINT_SCALE)
+  decodedPoints.set(raw, points)
+  return points
 }
 
 /**
@@ -52,18 +87,40 @@ export class BoardStore {
   readonly origin = { source: 'local' }
 
   private readonly shapes: Y.Map<Y.Map<unknown>>
+  private readonly history: Y.UndoManager
   private readonly listeners = new Set<() => void>()
   private sorted: Shape[] | null = null
+  private historyAvailability = 'false,false'
   private byId = new Map<string, Shape>()
 
   constructor(doc: Y.Doc = new Y.Doc()) {
     this.doc = doc
     this.shapes = doc.getMap('shapes')
     this.shapes.observeDeep(this.handleChange)
+
+    // Only transactions with our origin are tracked, so undo reverts this
+    // person's edits and leaves everyone else's alone.
+    this.history = new Y.UndoManager(this.shapes, {
+      trackedOrigins: new Set([this.origin]),
+      captureTimeout: UNDO_MERGE_MS,
+    })
+    this.history.on('stack-item-added', this.handleHistoryChange)
+    this.history.on('stack-item-popped', this.handleHistoryChange)
   }
 
   private handleChange = () => {
     this.sorted = null
+    for (const listener of this.listeners) listener()
+  }
+
+  /**
+   * The undo stack is updated just after the document's own change event, so
+   * tell listeners again if that changed whether undo or redo is possible.
+   */
+  private handleHistoryChange = () => {
+    const availability = `${this.canUndo()},${this.canRedo()}`
+    if (availability === this.historyAvailability) return
+    this.historyAvailability = availability
     for (const listener of this.listeners) listener()
   }
 
@@ -102,7 +159,8 @@ export class BoardStore {
     this.transact(() => {
       const map = new Y.Map<unknown>()
       for (const [key, value] of Object.entries(shape)) {
-        if (key !== 'id') map.set(key, value)
+        if (key === 'id' || value === undefined) continue
+        map.set(key, key === 'points' ? encodePoints(value as number[]) : value)
       }
       this.shapes.set(shape.id, map)
     })
@@ -129,6 +187,33 @@ export class BoardStore {
     this.doc.transact(fn, this.origin)
   }
 
+  // ---- Undo ----
+
+  undo(): void {
+    this.history.undo()
+  }
+
+  redo(): void {
+    this.history.redo()
+  }
+
+  canUndo(): boolean {
+    return this.history.canUndo()
+  }
+
+  canRedo(): boolean {
+    return this.history.canRedo()
+  }
+
+  /**
+   * End the current undo step. Edits made in quick succession are merged
+   * into one step (a drag is hundreds of tiny moves); call this at the
+   * boundary of each gesture so separate actions undo separately.
+   */
+  commit(): void {
+    this.history.stopCapturing()
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -136,6 +221,7 @@ export class BoardStore {
 
   destroy(): void {
     this.shapes.unobserveDeep(this.handleChange)
+    this.history.destroy()
     this.listeners.clear()
   }
 }

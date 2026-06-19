@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createBoardSession } from '../board/session'
 import { BoardCanvas } from './BoardCanvas'
 import { ConnectionStatus } from './ConnectionStatus'
+import { HistoryControls } from './HistoryControls'
 import { PresenceBar } from './PresenceBar'
 import { TextEditor } from './TextEditor'
 import { Toolbar } from './Toolbar'
@@ -28,6 +29,7 @@ export function Board({ boardId }: { boardId: string }) {
     <div className="board">
       <BoardCanvas editor={editor} presence={presence} />
       <TextEditor editor={editor} state={state} />
+      <HistoryControls editor={editor} state={state} />
       <ConnectionStatus sync={sync} />
       <PresenceBar editor={editor} presence={presence} />
       <Toolbar editor={editor} state={state} />

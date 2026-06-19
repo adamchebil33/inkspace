@@ -1,10 +1,15 @@
 import {
+  arrowEnds,
+  arrowFromEnds,
   clampZoom,
   handleAt,
+  handlesFor,
+  pointsSize,
   rectFromPoints,
   rectsIntersect,
   resizeRect,
   screenToWorld,
+  simplifyPoints,
   topShapeAt,
   zoomAt,
   type Camera,
@@ -12,9 +17,18 @@ import {
   type Point,
   type Rect,
 } from './geometry'
+import type { Draft } from './presence'
 import { HANDLE_SIZE, type RenderState } from './render'
 import type { BoardStore } from './store'
-import type { ColorName, Shape, ShapeType, Tool } from './types'
+import { FONT_SIZE, LINE_HEIGHT, textBlockSize, textScale } from './text'
+import {
+  isBoxType,
+  type BoxType,
+  type ColorName,
+  type Shape,
+  type ShapeType,
+  type Tool,
+} from './types'
 
 /** A pointer event reduced to what the editor needs; x/y are canvas pixels. */
 export interface PointerInput {
@@ -33,15 +47,31 @@ export interface WheelInput {
   zoom: boolean
 }
 
+/**
+ * Boxes are coloured by their fill; pen, arrows and text by their line.
+ * Each family remembers its own colour, so picking a red pen does not turn
+ * the next sticky note red.
+ */
+export type ColorFamily = 'fill' | 'ink'
+
 /** Everything the React UI renders from. Replaced, never mutated. */
 export interface EditorState {
   tool: Tool
   selection: readonly string[]
   camera: Camera
   editingId: string | null
+  /** Colour the next shape drawn with the current tool will get. */
   color: ColorName
+  colorFamily: ColorFamily
+  canUndo: boolean
+  canRedo: boolean
   /** Bumps on every document change so the UI re-reads shapes. */
   docVersion: number
+}
+
+export interface EditorOptions {
+  /** Width of a string at the base font size. Injected so tests need no DOM. */
+  measureText?: (text: string) => number
 }
 
 type Interaction =
@@ -56,32 +86,25 @@ type Interaction =
       /** Plain click on an already-selected shape narrows the selection to it. */
       collapseTo: string | null
     }
-  | {
-      kind: 'resize'
-      id: string
-      handle: Handle
-      startWorld: Point
-      original: Rect
-    }
-  | {
-      kind: 'marquee'
-      startWorld: Point
-      currentWorld: Point
-      base: readonly string[]
-    }
-  | {
-      kind: 'create'
-      type: ShapeType
-      startScreen: Point
-      startWorld: Point
-      id: string | null
-    }
+  | { kind: 'resize'; id: string; handle: Handle; startWorld: Point; original: Rect }
+  /** Dragging one end of an arrow while the other stays put. */
+  | { kind: 'endpoint'; id: string; fixed: Point; moving: 'start' | 'end'; creating: boolean }
+  | { kind: 'marquee'; startWorld: Point; currentWorld: Point; base: readonly string[] }
+  | { kind: 'create'; type: ShapeType; startScreen: Point; startWorld: Point; id: string | null }
+  /** Pen stroke in progress: flat x, y pairs in world coordinates. */
+  | { kind: 'draw'; points: number[] }
+
+/** What the pointer would grab on the single selected shape. */
+type Grab = { kind: 'resize'; handle: Handle } | { kind: 'endpoint'; moving: 'start' | 'end' }
 
 const DRAG_THRESHOLD = 3
 const MIN_SHAPE_SIZE = 8
 const DUPLICATE_OFFSET = 20
+/** Screen pixels within which a thin line still counts as hit. */
+const LINE_HIT_TOLERANCE = 7
+const DEFAULT_ARROW_LENGTH = 160
 
-const DEFAULT_SIZE: Record<ShapeType, { w: number; h: number }> = {
+const DEFAULT_SIZE: Record<BoxType, { w: number; h: number }> = {
   sticky: { w: 200, h: 200 },
   rect: { w: 180, h: 110 },
   ellipse: { w: 150, h: 150 },
@@ -102,6 +125,10 @@ const newId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16)
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
+const familyOf = (type: ShapeType): ColorFamily => (isBoxType(type) ? 'fill' : 'ink')
+
+const isShapeTool = (tool: Tool): tool is ShapeType => tool !== 'select' && tool !== 'hand'
+
 /**
  * The whiteboard's interaction logic: tools, selection, camera and gestures.
  *
@@ -117,7 +144,7 @@ export class Editor {
   private tool: Tool = 'select'
   private selection: readonly string[] = []
   private editingId: string | null = null
-  private color: ColorName = 'yellow'
+  private colors: Record<ColorFamily, ColorName> = { fill: 'yellow', ink: 'gray' }
   private spaceHeld = false
   private interaction: Interaction = { kind: 'idle' }
   private pointer: Point = { x: 0, y: 0 }
@@ -125,15 +152,17 @@ export class Editor {
   private docVersion = 0
 
   private state: EditorState
+  private readonly measureText: (text: string) => number
   private readonly listeners = new Set<() => void>()
   private readonly unsubscribeStore: () => void
 
-  constructor(store: BoardStore) {
+  constructor(store: BoardStore, options: EditorOptions = {}) {
     this.store = store
+    this.measureText = options.measureText ?? ((text) => text.length * FONT_SIZE * 0.5)
     this.state = this.buildState()
     this.unsubscribeStore = store.subscribe(() => {
       this.docVersion++
-      // Shapes can disappear under us (deleted here or by someone else).
+      // Shapes can disappear under us (deleted here, undone, or by someone else).
       this.selection = this.selection.filter((id) => store.get(id))
       if (this.editingId && !store.get(this.editingId)) this.editingId = null
       this.emit()
@@ -163,7 +192,19 @@ export class Editor {
       selection: this.selection,
       marquee: i.kind === 'marquee' ? rectFromPoints(i.startWorld, i.currentWorld) : null,
       editingId: this.editingId,
+      draft: this.getDraft(),
     }
+  }
+
+  /** The pen stroke being drawn, if any. Also shared live with other people. */
+  getDraft(): Draft | null {
+    const i = this.interaction
+    return i.kind === 'draw' ? { color: this.colors.ink, points: i.points } : null
+  }
+
+  /** True while a pen stroke is in progress (the canvas then feeds us every sample). */
+  isDrawing(): boolean {
+    return this.interaction.kind === 'draw'
   }
 
   /** CSS cursor for the current tool and whatever is under the pointer. */
@@ -173,21 +214,32 @@ export class Editor {
     if (i.kind === 'resize') return RESIZE_CURSOR[i.handle]
     if (i.kind === 'move' && i.dragged) return 'move'
     if (this.spaceHeld || this.tool === 'hand') return 'grab'
+    if (this.tool === 'text') return 'text'
     if (this.tool !== 'select') return 'crosshair'
 
     const world = screenToWorld(this.camera, this.pointer)
-    const handle = this.handleUnder(world)
-    if (handle) return RESIZE_CURSOR[handle]
-    return topShapeAt(this.store.list(), world) ? 'move' : 'default'
+    const grab = this.grabUnder(world)
+    if (grab) return grab.kind === 'resize' ? RESIZE_CURSOR[grab.handle] : 'crosshair'
+    return this.shapeAt(world) ? 'move' : 'default'
+  }
+
+  private colorFamily(): ColorFamily {
+    if (isShapeTool(this.tool)) return familyOf(this.tool)
+    const first = this.selection[0] && this.store.get(this.selection[0])
+    return first ? familyOf(first.type) : 'fill'
   }
 
   private buildState(): EditorState {
+    const colorFamily = this.colorFamily()
     return {
       tool: this.tool,
       selection: this.selection,
       camera: this.camera,
       editingId: this.editingId,
-      color: this.color,
+      color: this.colors[colorFamily],
+      colorFamily,
+      canUndo: this.store.canUndo(),
+      canRedo: this.store.canRedo(),
       docVersion: this.docVersion,
     }
   }
@@ -200,15 +252,16 @@ export class Editor {
   // ---- Tools, colour, selection ----
 
   setTool(tool: Tool): void {
+    this.endEditing()
     this.tool = tool
-    this.editingId = null
-    if (tool !== 'select' && tool !== 'hand') this.selection = []
+    if (isShapeTool(tool)) this.selection = []
     this.emit()
   }
 
   /** Sets the colour for new shapes and recolours the current selection. */
   setColor(color: ColorName): void {
-    this.color = color
+    this.colors[this.colorFamily()] = color
+    this.store.commit()
     this.store.transact(() => {
       for (const id of this.selection) this.store.update(id, { color })
     })
@@ -222,7 +275,7 @@ export class Editor {
 
   /** Escape: stop editing, then drop the tool, then clear the selection. */
   cancel(): void {
-    if (this.editingId) this.editingId = null
+    if (this.editingId) this.endEditing()
     else if (this.tool !== 'select') this.tool = 'select'
     else this.selection = []
     this.interaction = { kind: 'idle' }
@@ -230,11 +283,13 @@ export class Editor {
   }
 
   deleteSelection(): void {
+    this.store.commit()
     this.store.remove(this.selection)
   }
 
   duplicateSelection(): void {
     const copies: string[] = []
+    this.store.commit()
     this.store.transact(() => {
       let z = this.store.topZ()
       for (const id of this.selection) {
@@ -268,16 +323,32 @@ export class Editor {
   reorderSelection(to: 'front' | 'back'): void {
     const selected = new Set(this.selection)
     const shapes = this.store.list().filter((s) => selected.has(s.id))
+    this.store.commit()
     this.store.transact(() => {
       let z = to === 'front' ? this.store.topZ() : this.store.bottomZ() - shapes.length + 1
       for (const shape of shapes) this.store.update(shape.id, { z: z++ })
     })
   }
 
+  /** Undo and redo only ever touch this person's own edits. */
+  undo(): void {
+    this.endEditing()
+    this.store.undo()
+    this.emit()
+  }
+
+  redo(): void {
+    this.endEditing()
+    this.store.redo()
+    this.emit()
+  }
+
   // ---- Text editing ----
 
   startEditing(id: string): void {
-    if (!this.store.get(id)) return
+    const shape = this.store.get(id)
+    if (!shape || shape.type === 'pen' || shape.type === 'arrow') return
+    this.store.commit()
     this.selection = [id]
     this.editingId = id
     this.emit()
@@ -285,12 +356,29 @@ export class Editor {
 
   stopEditing(): void {
     if (!this.editingId) return
-    this.editingId = null
+    this.endEditing()
     this.emit()
   }
 
+  private endEditing(): void {
+    const shape = this.editingId ? this.store.get(this.editingId) : undefined
+    this.editingId = null
+    this.store.commit()
+    // A text shape with nothing in it is invisible; don't leave it behind.
+    if (shape?.type === 'text' && shape.text.trim() === '') this.store.remove([shape.id])
+  }
+
   setText(id: string, text: string): void {
-    this.store.update(id, { text })
+    const shape = this.store.get(id)
+    if (!shape) return
+    if (shape.type !== 'text') {
+      this.store.update(id, { text })
+      return
+    }
+    // A text shape's box is exactly its text, at whatever scale it has.
+    const scale = textScale(shape)
+    const size = textBlockSize(text, this.measureText)
+    this.store.update(id, { text, w: size.w * scale, h: size.h * scale })
   }
 
   // ---- Camera ----
@@ -298,11 +386,7 @@ export class Editor {
   setViewport(w: number, h: number): void {
     // First layout: put the world origin in the middle of the screen.
     if (this.viewport.w === 0 && this.viewport.h === 0 && this.camera.x === 0) {
-      this.camera = {
-        ...this.camera,
-        x: -w / 2 / this.camera.zoom,
-        y: -h / 2 / this.camera.zoom,
-      }
+      this.camera = { ...this.camera, x: -w / 2 / this.camera.zoom, y: -h / 2 / this.camera.zoom }
     }
     this.viewport = { w, h }
     this.emit()
@@ -360,19 +444,17 @@ export class Editor {
   pointerDown(p: PointerInput): void {
     this.pointer = p
     this.pointerInside = true
-    this.editingId = null
+    this.endEditing()
     const world = screenToWorld(this.camera, p)
 
     if (p.button === 1 || (p.button === 0 && (this.spaceHeld || this.tool === 'hand'))) {
-      this.interaction = {
-        kind: 'pan',
-        startScreen: p,
-        startCamera: this.camera,
-      }
+      this.interaction = { kind: 'pan', startScreen: p, startCamera: this.camera }
     } else if (p.button !== 0) {
       // Other buttons do nothing, but editing has still ended.
     } else if (this.tool === 'select') {
       this.beginSelectGesture(p, world)
+    } else if (this.tool === 'pen') {
+      this.interaction = { kind: 'draw', points: [world.x, world.y] }
     } else if (this.tool !== 'hand') {
       this.interaction = {
         kind: 'create',
@@ -387,28 +469,34 @@ export class Editor {
 
   private beginSelectGesture(p: PointerInput, world: Point): void {
     const single = this.singleSelection()
-    const handle = this.handleUnder(world)
-    if (single && handle) {
+    const grab = this.grabUnder(world)
+    if (single && grab?.kind === 'resize') {
       this.interaction = {
         kind: 'resize',
         id: single.id,
-        handle,
+        handle: grab.handle,
         startWorld: world,
         original: { x: single.x, y: single.y, w: single.w, h: single.h },
       }
       return
     }
+    if (single && grab?.kind === 'endpoint') {
+      const { start, end } = arrowEnds(single)
+      this.interaction = {
+        kind: 'endpoint',
+        id: single.id,
+        moving: grab.moving,
+        fixed: grab.moving === 'end' ? start : end,
+        creating: false,
+      }
+      return
+    }
 
-    const hit = topShapeAt(this.store.list(), world)
+    const hit = this.shapeAt(world)
     if (!hit) {
       const base = p.shift ? this.selection : []
       this.selection = base
-      this.interaction = {
-        kind: 'marquee',
-        startWorld: world,
-        currentWorld: world,
-        base,
-      }
+      this.interaction = { kind: 'marquee', startWorld: world, currentWorld: world, base }
       return
     }
 
@@ -463,13 +551,23 @@ export class Editor {
         break
       }
 
-      case 'resize':
+      case 'resize': {
+        // Text scales as a whole, so it always keeps its proportions.
+        const isText = this.store.get(i.id)?.type === 'text'
         this.store.update(
           i.id,
           resizeRect(i.original, i.handle, world.x - i.startWorld.x, world.y - i.startWorld.y, {
             minSize: MIN_SHAPE_SIZE,
-            keepAspect: p.shift,
+            keepAspect: p.shift || isText,
           }),
+        )
+        break
+      }
+
+      case 'endpoint':
+        this.store.update(
+          i.id,
+          i.moving === 'end' ? arrowFromEnds(i.fixed, world) : arrowFromEnds(world, i.fixed),
         )
         break
 
@@ -484,13 +582,14 @@ export class Editor {
         break
       }
 
-      case 'create': {
-        const rect = rectFromPoints(i.startWorld, world)
-        if (i.id) {
-          this.store.update(i.id, rect)
-        } else if (distance(p, i.startScreen) >= DRAG_THRESHOLD) {
-          i.id = this.createShape(i.type, rect)
-        }
+      case 'create':
+        this.dragCreate(i, p, world)
+        break
+
+      case 'draw': {
+        // Skip moves too small to see; the rest is simplified on release.
+        const last = { x: i.points[i.points.length - 2]!, y: i.points[i.points.length - 1]! }
+        if (distance(world, last) * this.camera.zoom >= 1) i.points.push(world.x, world.y)
         break
       }
 
@@ -498,6 +597,29 @@ export class Editor {
         break
     }
     this.emit()
+  }
+
+  private dragCreate(i: Interaction & { kind: 'create' }, p: PointerInput, world: Point): void {
+    if (i.id) {
+      this.store.update(i.id, rectFromPoints(i.startWorld, world))
+      return
+    }
+    // Text is placed with a click; dragging the text tool does nothing extra.
+    if (i.type === 'text' || distance(p, i.startScreen) < DRAG_THRESHOLD) return
+
+    if (i.type === 'arrow') {
+      // From here on it is the same gesture as dragging an arrow's head.
+      const id = this.createShape('arrow', arrowFromEnds(i.startWorld, world))
+      this.interaction = {
+        kind: 'endpoint',
+        id,
+        fixed: i.startWorld,
+        moving: 'end',
+        creating: true,
+      }
+      return
+    }
+    i.id = this.createShape(i.type, rectFromPoints(i.startWorld, world))
   }
 
   pointerUp(p: PointerInput): void {
@@ -508,37 +630,81 @@ export class Editor {
     if (i.kind === 'move' && !i.dragged && i.collapseTo) {
       this.selection = [i.collapseTo]
     }
+    if (i.kind === 'create') this.finishCreate(i)
+    if (i.kind === 'endpoint' && i.creating) this.tool = 'select'
+    if (i.kind === 'draw') this.finishStroke(i.points)
 
-    if (i.kind === 'create') {
-      if (i.id) {
-        // Dragged out: make sure it isn't too small to grab again.
-        const shape = this.store.get(i.id)
-        if (shape) {
-          this.store.update(i.id, {
-            w: Math.max(shape.w, MIN_SHAPE_SIZE),
-            h: Math.max(shape.h, MIN_SHAPE_SIZE),
-          })
-        }
-      } else {
-        // Plain click: drop a default-sized shape centred on the pointer.
-        const size = DEFAULT_SIZE[i.type]
-        const id = this.createShape(i.type, {
-          x: i.startWorld.x - size.w / 2,
-          y: i.startWorld.y - size.h / 2,
-          ...size,
-        })
-        if (i.type === 'sticky') this.editingId = id
-      }
-      this.tool = 'select'
-    }
+    // Whatever this gesture changed is one undo step.
+    this.store.commit()
     this.emit()
+  }
+
+  private finishCreate(i: Interaction & { kind: 'create' }): void {
+    const at = i.startWorld
+    if (i.id) {
+      // Dragged out: make sure it isn't too small to grab again.
+      const shape = this.store.get(i.id)
+      if (shape) {
+        this.store.update(i.id, {
+          w: Math.max(shape.w, MIN_SHAPE_SIZE),
+          h: Math.max(shape.h, MIN_SHAPE_SIZE),
+        })
+      }
+    } else if (i.type === 'text') {
+      // An empty text block, one line tall, with its first line at the pointer.
+      const size = textBlockSize('', this.measureText)
+      this.editingId = this.createShape('text', { x: at.x, y: at.y - LINE_HEIGHT / 2, ...size })
+    } else if (i.type === 'arrow') {
+      this.createShape(
+        'arrow',
+        arrowFromEnds(
+          { x: at.x - DEFAULT_ARROW_LENGTH / 2, y: at.y },
+          { x: at.x + DEFAULT_ARROW_LENGTH / 2, y: at.y },
+        ),
+      )
+    } else if (isBoxType(i.type)) {
+      // Plain click: drop a default-sized shape centred on the pointer.
+      const size = DEFAULT_SIZE[i.type]
+      const id = this.createShape(i.type, { x: at.x - size.w / 2, y: at.y - size.h / 2, ...size })
+      if (i.type === 'sticky') this.editingId = id
+    }
+    this.tool = 'select'
+  }
+
+  /** Turn the drawn points into a saved pen shape. The pen stays active. */
+  private finishStroke(raw: number[]): void {
+    // Half a screen pixel of error is invisible but removes most points.
+    const points = simplifyPoints(raw, 0.5 / this.camera.zoom)
+    let left = Infinity
+    let top = Infinity
+    for (let n = 0; n < points.length; n += 2) {
+      left = Math.min(left, points[n]!)
+      top = Math.min(top, points[n + 1]!)
+    }
+    const relative = points.map((v, n) => v - (n % 2 === 0 ? left : top))
+    // A click without movement becomes a dot.
+    if (relative.length === 2) relative.push(0.1, 0.1)
+
+    const size = pointsSize(relative)
+    this.store.add({
+      id: newId(),
+      type: 'pen',
+      x: left,
+      y: top,
+      w: Math.max(size.w, 1),
+      h: Math.max(size.h, 1),
+      color: this.colors.ink,
+      text: '',
+      z: this.store.topZ(),
+      points: relative,
+    })
   }
 
   /** Double-click: edit the shape's text, or drop a new sticky on empty space. */
   doubleClick(p: PointerInput): void {
     if (this.tool !== 'select') return
     const world = screenToWorld(this.camera, p)
-    const hit = topShapeAt(this.store.list(), world)
+    const hit = this.shapeAt(world)
     if (hit) {
       this.startEditing(hit.id)
       return
@@ -554,18 +720,17 @@ export class Editor {
 
   // ---- Helpers ----
 
-  private createShape(type: ShapeType, rect: Rect): string {
+  private createShape(type: ShapeType, box: Rect & { flipX?: boolean; flipY?: boolean }): string {
     const id = newId()
-    this.store.add({
-      id,
-      type,
-      ...rect,
-      color: this.color,
-      text: '',
-      z: this.store.topZ(),
-    })
+    const color = this.colors[familyOf(type)]
+    this.store.add({ id, type, ...box, color, text: '', z: this.store.topZ() })
     this.selection = [id]
     return id
+  }
+
+  /** Topmost shape under a world point, with some slack for thin lines. */
+  private shapeAt(world: Point): Shape | undefined {
+    return topShapeAt(this.store.list(), world, LINE_HIT_TOLERANCE / this.camera.zoom)
   }
 
   private singleSelection(): Shape | undefined {
@@ -573,10 +738,19 @@ export class Editor {
     return id && rest.length === 0 ? this.store.get(id) : undefined
   }
 
-  /** Resize handle of the single selected shape under `world`, if any. */
-  private handleUnder(world: Point): Handle | null {
+  /** Handle of the single selected shape under `world`, if any. */
+  private grabUnder(world: Point): Grab | null {
     const single = this.singleSelection()
     if (!single) return null
-    return handleAt(single, world, HANDLE_SIZE / this.camera.zoom)
+    const reach = HANDLE_SIZE / this.camera.zoom
+
+    if (single.type === 'arrow') {
+      const { start, end } = arrowEnds(single)
+      if (distance(world, end) <= reach) return { kind: 'endpoint', moving: 'end' }
+      if (distance(world, start) <= reach) return { kind: 'endpoint', moving: 'start' }
+      return null
+    }
+    const handle = handleAt(single, world, reach, handlesFor(single.type))
+    return handle ? { kind: 'resize', handle } : null
   }
 }

@@ -58,7 +58,10 @@ describe('BoardStore', () => {
       store.add(shape({ id: 'a' }))
       store.add(shape({ id: 'b' }))
     })
-    expect(calls).toBe(1)
+    // Once for the change, once more because undo just became available.
+    expect(calls).toBe(2)
+    store.transact(() => store.update('a', { x: 5 }))
+    expect(calls).toBe(3)
   })
 
   it('ignores malformed shapes written by another client', () => {
@@ -111,5 +114,89 @@ describe('two clients', () => {
     Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc))
 
     expect(a.get('a')?.text).toBe(b.get('a')?.text)
+  })
+})
+
+describe('pen strokes', () => {
+  it('stores points compactly and reads them back', () => {
+    const [a, b] = connectedPair()
+    a.add(shape({ type: 'pen', points: [0, 0, 12.34, 5.67] }))
+
+    expect(b.get('a')?.points).toEqual([0, 0, 12.3, 5.7])
+    // On the wire they are whole numbers (tenths of a unit).
+    const raw = (b.doc.getMap('shapes').get('a') as Y.Map<unknown>).get('points')
+    expect(raw).toEqual([0, 0, 123, 57])
+  })
+
+  it('keeps the same points array across unrelated changes', () => {
+    const store = new BoardStore()
+    store.add(shape({ type: 'pen', points: [0, 0, 10, 10] }))
+    const before = store.get('a')!.points
+    store.update('a', { x: 500 })
+    expect(store.get('a')!.points).toBe(before)
+  })
+
+  it('drops a pen shape with broken points', () => {
+    const store = new BoardStore()
+    store.add(shape({ type: 'pen', points: [0, 0, 10, 10] }))
+    ;(store.doc.getMap('shapes').get('a') as Y.Map<unknown>).set('points', [1, 2, 3])
+    expect(store.list()).toEqual([])
+  })
+})
+
+describe('undo', () => {
+  it('undoes and redoes local edits', () => {
+    const store = new BoardStore()
+    store.add(shape())
+    store.commit()
+    store.update('a', { x: 50 })
+    expect(store.canUndo()).toBe(true)
+
+    store.undo()
+    expect(store.get('a')?.x).toBe(0)
+    store.undo()
+    expect(store.list()).toEqual([])
+    expect(store.canUndo()).toBe(false)
+
+    store.redo()
+    store.redo()
+    expect(store.get('a')?.x).toBe(50)
+  })
+
+  it('merges quick successive edits into one step', () => {
+    const store = new BoardStore()
+    store.add(shape())
+    store.commit()
+    for (let x = 1; x <= 20; x++) store.update('a', { x })
+    store.undo()
+    expect(store.get('a')?.x).toBe(0)
+  })
+
+  it("only undoes this person's own edits", () => {
+    const [a, b] = connectedPair()
+    a.add(shape({ id: 'from-a' }))
+    b.add(shape({ id: 'from-b' }))
+    a.commit()
+    // A's latest edit is a move; B then recolours the same shape.
+    a.update('from-a', { x: 300 })
+    b.update('from-a', { color: 'pink' })
+
+    a.undo()
+    // A's move is reverted, B's recolour and B's shape are untouched.
+    expect(a.get('from-a')).toMatchObject({ x: 0, color: 'pink' })
+    expect(b.get('from-a')).toMatchObject({ x: 0, color: 'pink' })
+    expect(a.get('from-b')).toBeDefined()
+
+    a.undo()
+    expect(b.list().map((s) => s.id)).toEqual(['from-b'])
+    expect(a.canUndo()).toBe(false)
+  })
+
+  it('tells subscribers when undo becomes available', () => {
+    const store = new BoardStore()
+    const seen: boolean[] = []
+    store.subscribe(() => seen.push(store.canUndo()))
+    store.add(shape())
+    expect(seen.at(-1)).toBe(true)
   })
 })

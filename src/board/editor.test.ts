@@ -198,3 +198,156 @@ describe('commands', () => {
     expect(editor.getState().camera).toMatchObject({ x: -100, y: -30 })
   })
 })
+
+describe('pen', () => {
+  function stroke(points: [number, number][]) {
+    editor.setTool('pen')
+    editor.pointerDown(at(...points[0]!))
+    for (const p of points.slice(1)) editor.pointerMove(at(...p))
+    editor.pointerUp(at(...points.at(-1)!))
+  }
+
+  it('saves a simplified stroke relative to its bounding box', () => {
+    stroke([
+      [100, 100],
+      [110, 100],
+      [120, 100],
+      [130, 100],
+      [130, 140],
+    ])
+    const [pen] = store.list()
+    expect(pen).toMatchObject({ type: 'pen', x: 100, y: 100, w: 30, h: 40, color: 'gray' })
+    expect(pen!.points).toEqual([0, 0, 30, 0, 30, 40])
+  })
+
+  it('exposes the stroke in progress and keeps the pen active afterwards', () => {
+    editor.setTool('pen')
+    editor.pointerDown(at(0, 0))
+    editor.pointerMove(at(20, 20))
+    expect(editor.getDraft()).toEqual({ color: 'gray', points: [0, 0, 20, 20] })
+    expect(store.list()).toEqual([])
+
+    editor.pointerUp(at(20, 20))
+    expect(editor.getDraft()).toBeNull()
+    expect(store.list()).toHaveLength(1)
+    expect(editor.getState().tool).toBe('pen')
+  })
+
+  it('turns a click into a dot', () => {
+    stroke([[50, 50]])
+    expect(store.list()[0]).toMatchObject({ type: 'pen', x: 50, y: 50 })
+  })
+
+  it('keeps a separate colour for ink and for fills', () => {
+    editor.setTool('pen')
+    editor.setColor('red')
+    stroke([
+      [0, 0],
+      [40, 40],
+    ])
+    const sticky = drawRect(200, 200, 300, 300)
+    expect(store.list().find((s) => s.type === 'pen')?.color).toBe('red')
+    expect(store.get(sticky)?.color).toBe('yellow')
+  })
+
+  it('can be selected by clicking near the line', () => {
+    stroke([
+      [0, 0],
+      [100, 0],
+      [100, 100],
+    ])
+    editor.setTool('select')
+    click(at(50, 50))
+    expect(editor.getState().selection).toEqual([])
+    click(at(50, 3))
+    expect(editor.getState().selection).toHaveLength(1)
+  })
+})
+
+describe('arrows', () => {
+  it('drags out an arrow in any direction', () => {
+    editor.setTool('arrow')
+    drag(at(200, 200), at(120, 260))
+    const [arrow] = store.list()
+    expect(arrow).toMatchObject({ type: 'arrow', x: 120, y: 200, w: 80, h: 60, flipX: true })
+    expect(arrow!.flipY).toBe(false)
+    expect(editor.getState().tool).toBe('select')
+  })
+
+  it('moves one end while the other stays put', () => {
+    editor.setTool('arrow')
+    drag(at(0, 0), at(100, 0))
+    // Still selected: grab the head and drag it below and left of the tail.
+    drag(at(100, 0), at(-50, 80))
+    expect(store.list()[0]).toMatchObject({ x: -50, y: 0, w: 50, h: 80, flipX: true, flipY: false })
+    // Now the tail.
+    drag(at(0, 0), at(-50, 0))
+    expect(store.list()[0]).toMatchObject({ x: -50, y: 0, w: 0, h: 80 })
+  })
+})
+
+describe('text', () => {
+  it('places text with a click and sizes the box to the text', () => {
+    editor.setTool('text')
+    click(at(100, 100))
+    const id = editor.getState().editingId!
+    expect(store.get(id)).toMatchObject({ type: 'text', x: 100 })
+
+    // The test editor measures 8 units per character.
+    editor.setText(id, 'hello\nworld!')
+    expect(store.get(id)).toMatchObject({ w: 48, h: 42 })
+  })
+
+  it('removes a text shape that was left empty', () => {
+    editor.setTool('text')
+    click(at(100, 100))
+    editor.stopEditing()
+    expect(store.list()).toEqual([])
+  })
+
+  it('scales the text when resized and keeps that scale while typing', () => {
+    editor.setTool('text')
+    click(at(0, 0))
+    const id = editor.getState().editingId!
+    editor.setText(id, 'abcd')
+    editor.stopEditing()
+    const before = store.get(id)!
+
+    // Drag the bottom-right corner out to twice the size.
+    drag(
+      at(before.x + before.w, before.y + before.h),
+      at(before.x + before.w * 2, before.y + before.h * 2),
+    )
+    expect(store.get(id)).toMatchObject({ w: before.w * 2, h: before.h * 2 })
+
+    editor.setText(id, 'abcdefgh')
+    expect(store.get(id)).toMatchObject({ w: before.w * 4, h: before.h * 2 })
+  })
+})
+
+describe('undo and redo', () => {
+  it('treats each gesture as one step', () => {
+    const id = drawRect(0, 0, 100, 100)
+    editor.pointerDown(at(50, 50))
+    for (let x = 60; x <= 200; x += 10) editor.pointerMove(at(x, 50))
+    editor.pointerUp(at(200, 50))
+    expect(store.get(id)?.x).toBe(150)
+
+    editor.undo()
+    expect(store.get(id)?.x).toBe(0)
+    editor.undo()
+    expect(store.list()).toEqual([])
+    expect(editor.getState()).toMatchObject({ canUndo: false, canRedo: true })
+
+    editor.redo()
+    editor.redo()
+    expect(store.get(id)?.x).toBe(150)
+  })
+
+  it('brings back deleted shapes', () => {
+    drawRect(0, 0, 100, 100)
+    editor.deleteSelection()
+    editor.undo()
+    expect(store.list()).toHaveLength(1)
+  })
+})

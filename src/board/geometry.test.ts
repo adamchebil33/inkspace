@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_ZOOM,
   MIN_ZOOM,
+  arrowEnds,
+  arrowFromEnds,
+  distanceToSegment,
+  handlesFor,
+  pointsSize,
+  simplifyPoints,
   handleAt,
   hitTest,
   rectFromPoints,
@@ -146,5 +152,64 @@ describe('resizeRect', () => {
       w: 200,
       h: 100,
     })
+  })
+})
+
+describe('lines', () => {
+  it('measures distance to a segment, including past its ends', () => {
+    const a = { x: 0, y: 0 }
+    const b = { x: 10, y: 0 }
+    expect(distanceToSegment({ x: 5, y: 3 }, a, b)).toBe(3)
+    expect(distanceToSegment({ x: 14, y: 3 }, a, b)).toBe(5)
+    expect(distanceToSegment({ x: 3, y: 4 }, a, a)).toBe(5)
+  })
+
+  it('hits a pen stroke near its line, not anywhere in its box', () => {
+    // An L shape: down the left edge, then along the bottom.
+    const pen = { type: 'pen', x: 100, y: 100, w: 50, h: 50, points: [0, 0, 0, 50, 50, 50] }
+    expect(hitTest(pen, { x: 102, y: 120 }, 4)).toBe(true)
+    expect(hitTest(pen, { x: 130, y: 152 }, 4)).toBe(true)
+    expect(hitTest(pen, { x: 135, y: 115 }, 4)).toBe(false)
+  })
+
+  it('hits a resized pen stroke where it is drawn', () => {
+    // Same stroke stretched to twice the size.
+    const pen = { type: 'pen', x: 0, y: 0, w: 100, h: 100, points: [0, 0, 0, 50, 50, 50] }
+    expect(hitTest(pen, { x: 80, y: 99 }, 4)).toBe(true)
+    expect(hitTest(pen, { x: 40, y: 50 }, 4)).toBe(false)
+  })
+
+  it('simplifies a stroke without moving it by more than the tolerance', () => {
+    // A nearly straight line with small wobbles, then a sharp corner.
+    const raw = [0, 0, 10, 0.2, 20, -0.2, 30, 0.1, 40, 0, 40, 30]
+    expect(simplifyPoints(raw, 0.5)).toEqual([0, 0, 40, 0, 40, 30])
+    expect(simplifyPoints(raw, 0.05)).toEqual(raw)
+    expect(simplifyPoints([1, 2, 3, 4], 10)).toEqual([1, 2, 3, 4])
+  })
+
+  it('measures the extent of relative points', () => {
+    expect(pointsSize([0, 5, 30, 0, 12, 20])).toEqual({ w: 30, h: 20 })
+  })
+})
+
+describe('arrows', () => {
+  it('round-trips between two ends and a flipped bounding box', () => {
+    const start = { x: 100, y: 20 }
+    const end = { x: 40, y: 80 }
+    const box = arrowFromEnds(start, end)
+    expect(box).toEqual({ x: 40, y: 20, w: 60, h: 60, flipX: true, flipY: false })
+    expect(arrowEnds(box)).toEqual({ start, end })
+  })
+
+  it('is hit along its line only', () => {
+    const arrow = { type: 'arrow', ...arrowFromEnds({ x: 0, y: 0 }, { x: 100, y: 100 }) }
+    expect(hitTest(arrow, { x: 50, y: 52 }, 5)).toBe(true)
+    expect(hitTest(arrow, { x: 90, y: 10 }, 5)).toBe(false)
+  })
+
+  it('offers no box handles for arrows and corners only for text', () => {
+    expect(handlesFor('arrow')).toEqual([])
+    expect(handlesFor('text')).toEqual(['nw', 'ne', 'se', 'sw'])
+    expect(handlesFor('rect')).toHaveLength(8)
   })
 })

@@ -8,6 +8,9 @@ const TOOL_KEYS: Record<string, Tool> = {
   s: 'sticky',
   r: 'rect',
   o: 'ellipse',
+  a: 'arrow',
+  p: 'pen',
+  t: 'text',
 }
 
 const NUDGE: Record<string, [number, number]> = {
@@ -34,6 +37,9 @@ export function useShortcuts(editor: Editor): void {
       else if (key === 'Escape') editor.cancel()
       else if (nudge)
         editor.nudgeSelection(nudge[0] * (e.shiftKey ? 10 : 1), nudge[1] * (e.shiftKey ? 10 : 1))
+      else if (mod && key === 'z' && e.shiftKey) editor.redo()
+      else if (mod && key === 'z') editor.undo()
+      else if (mod && key === 'y') editor.redo()
       else if (mod && key === 'a') editor.selectAll()
       else if (mod && key === 'd') editor.duplicateSelection()
       else if (key === ']') editor.reorderSelection('front')

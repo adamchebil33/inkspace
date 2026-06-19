@@ -88,12 +88,21 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
     editor.pointerDown(toInput(e.nativeEvent, e.currentTarget))
   }
 
+  const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    // Browsers merge fast pointer moves into one event per frame. While
+    // drawing, replay the merged samples so quick strokes stay smooth.
+    const events = editor.isDrawing() ? e.nativeEvent.getCoalescedEvents() : []
+    for (const sample of events.length > 0 ? events : [e.nativeEvent]) {
+      editor.pointerMove(toInput(sample, e.currentTarget))
+    }
+  }
+
   return (
     <canvas
       ref={ref}
       className="board-canvas"
       onPointerDown={onPointerDown}
-      onPointerMove={(e) => editor.pointerMove(toInput(e.nativeEvent, e.currentTarget))}
+      onPointerMove={onPointerMove}
       onPointerUp={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
       onPointerCancel={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
       onPointerLeave={() => editor.pointerLeave()}

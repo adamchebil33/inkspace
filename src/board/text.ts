@@ -42,3 +42,18 @@ export function wrapText(text: string, maxWidth: number, measure: (s: string) =>
 
   return lines
 }
+
+/** Natural size of a free text block: no wrapping, only explicit line breaks. */
+export function textBlockSize(
+  text: string,
+  measure: (s: string) => number,
+): { w: number; h: number } {
+  const lines = text.split('\n')
+  const widest = Math.max(...lines.map(measure))
+  return { w: Math.max(widest, FONT_SIZE / 2), h: lines.length * LINE_HEIGHT }
+}
+
+/** How much a text shape's font is scaled, from the height of its box. */
+export function textScale(shape: Pick<Shape, 'text' | 'h'>): number {
+  return shape.h / (shape.text.split('\n').length * LINE_HEIGHT)
+}
