@@ -87,3 +87,31 @@ export const RedoIcon = () => (
     <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />
   </Icon>
 )
+
+export const LinkIcon = () => (
+  <Icon>
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </Icon>
+)
+
+export const EyeIcon = () => (
+  <Icon>
+    <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+)
+
+/** The Inkspace mark: a pen squiggle on a rounded square. */
+export const Logo = ({ size = 28 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="var(--accent)" />
+    <path
+      d="M7 20c3-9 6-9 9-1s6 4 9-6"
+      fill="none"
+      stroke="var(--accent-fg)"
+      strokeWidth="3"
+      strokeLinecap="round"
+    />
+  </svg>
+)

@@ -3,6 +3,7 @@ import * as decoding from 'lib0/decoding'
 import * as encoding from 'lib0/encoding'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
+import { canEditBoard } from '../shared/boardKey'
 import { encodeAwarenessRemoval, readAwarenessUpdate, type AwarenessEntry } from './awareness'
 
 // Top-level message types, shared with the client (src/board/sync-client.ts).
@@ -68,9 +69,15 @@ export class BoardRoom extends DurableObject<Env> {
       return new Response('This board is full', { status: 429 })
     }
 
+    // /api/ws/<boardId>?key=<editKey>: the key must hash to the board id.
+    // Without it the connection can read and show a cursor, but not write.
+    const url = new URL(request.url)
+    const boardId = url.pathname.split('/').pop() ?? ''
+    const canEdit = await canEditBoard(boardId, url.searchParams.get('key'))
+
     const { 0: client, 1: server } = new WebSocketPair()
     this.ctx.acceptWebSocket(server)
-    this.setAttachment(server, { canEdit: true, clocks: {} })
+    this.setAttachment(server, { canEdit, clocks: {} })
 
     // Ask the newcomer what it has that we don't (it asks us the same).
     const encoder = encoding.createEncoder()

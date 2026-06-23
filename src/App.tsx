@@ -1,16 +1,23 @@
-import { Board } from './components/Board'
-import { boardIdFromPath, newBoardId } from './lib/boardId'
-
-/** The board in the URL, creating one first if the URL doesn't name one. */
-function currentBoardId(): string {
-  const existing = boardIdFromPath(location.pathname)
-  if (existing) return existing
-  const id = newBoardId()
-  history.replaceState(null, '', `/b/${id}`)
-  return id
-}
+import { useRoute, navigate } from './lib/router'
+import { BoardPage } from './pages/BoardPage'
+import { Home } from './pages/Home'
 
 export function App() {
-  const boardId = currentBoardId()
-  return <Board key={boardId} boardId={boardId} />
+  const route = useRoute()
+
+  if (route.page === 'home') return <Home />
+  if (route.page === 'board') return <BoardPage boardId={route.boardId} editKey={route.editKey} />
+  return (
+    <div className="home">
+      <main className="home-main">
+        <h1>Page not found</h1>
+        <p className="lede">That link doesn't point to a board.</p>
+        <div className="home-cta">
+          <button type="button" className="primary" onClick={() => navigate('/')}>
+            Go to the home page
+          </button>
+        </div>
+      </main>
+    </div>
+  )
 }

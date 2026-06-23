@@ -1,42 +1,10 @@
-import { expect, test, type Browser, type Page } from '@playwright/test'
-
-/** A fresh board per test, so tests never see each other's shapes. */
-const newBoardUrl = () =>
-  `/b/e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-
-/** Each person gets their own browser context: separate storage, separate socket. */
-async function openBoard(browser: Browser, url: string): Promise<Page> {
-  const context = await browser.newContext()
-  const page = await context.newPage()
-  await page.goto(url)
-  await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
-  return page
-}
-
-/** The board is a canvas, so read shapes from the editor instead of the DOM. */
-const shapes = (page: Page) =>
-  page.evaluate(() =>
-    window.editor!.store.list().map(({ type, text, x, y }) => ({ type, text, x, y })),
-  )
-
-async function addSticky(page: Page, x: number, y: number, text: string) {
-  await page.getByRole('button', { name: 'Sticky note' }).click()
-  await page.mouse.click(x, y)
-  await page.keyboard.type(text)
-  await page.keyboard.press('Escape')
-}
-
-async function dragMouse(page: Page, from: [number, number], to: [number, number]) {
-  await page.mouse.move(...from)
-  await page.mouse.down()
-  await page.mouse.move(...to, { steps: 5 })
-  await page.mouse.up()
-}
+import { expect, test } from '@playwright/test'
+import { addSticky, dragMouse, newBoard, openBoard, shapes } from './helpers'
 
 test('a change in one window shows up in the other', async ({ browser }) => {
-  const url = newBoardUrl()
-  const alice = await openBoard(browser, url)
-  const bob = await openBoard(browser, url)
+  const board = await newBoard()
+  const alice = await openBoard(browser, board.edit)
+  const bob = await openBoard(browser, board.edit)
 
   await addSticky(alice, 400, 300, 'Hello from Alice')
   await expect.poll(() => shapes(bob)).toMatchObject([{ type: 'sticky', text: 'Hello from Alice' }])
@@ -52,27 +20,27 @@ test('a change in one window shows up in the other', async ({ browser }) => {
 })
 
 test('someone who joins later gets the whole board', async ({ browser }) => {
-  const url = newBoardUrl()
-  const alice = await openBoard(browser, url)
+  const board = await newBoard()
+  const alice = await openBoard(browser, board.edit)
   await addSticky(alice, 300, 300, 'First')
   await addSticky(alice, 600, 300, 'Second')
 
   // Wait until the server has it, then have everyone leave.
-  const probe = await openBoard(browser, url)
+  const probe = await openBoard(browser, board.edit)
   await expect.poll(() => shapes(probe)).toHaveLength(2)
   await alice.context().close()
   await probe.context().close()
 
-  const bob = await openBoard(browser, url)
+  const bob = await openBoard(browser, board.edit)
   await expect
     .poll(async () => (await shapes(bob)).map((s) => s.text).sort())
     .toEqual(['First', 'Second'])
 })
 
 test('edits made offline are merged after reconnecting', async ({ browser }) => {
-  const url = newBoardUrl()
-  const alice = await openBoard(browser, url)
-  const bob = await openBoard(browser, url)
+  const board = await newBoard()
+  const alice = await openBoard(browser, board.edit)
+  const bob = await openBoard(browser, board.edit)
   await addSticky(alice, 300, 300, 'Shared')
   await expect.poll(() => shapes(bob)).toHaveLength(1)
 

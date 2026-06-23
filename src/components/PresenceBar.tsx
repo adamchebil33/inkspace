@@ -29,7 +29,7 @@ export function PresenceBar({ editor, presence }: Props) {
   const hidden = peers.length - shown.length
 
   return (
-    <div className="panel presence">
+    <div className="presence">
       <ul className="avatars" aria-label="People on this board">
         <li>
           <button

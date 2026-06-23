@@ -4,6 +4,6 @@ import { defineConfig } from 'vitest/config'
 // Cloudflare plugin. Browser behaviour is covered by Playwright (tests/e2e).
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts', 'worker/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'worker/**/*.test.ts', 'shared/**/*.test.ts'],
   },
 })

@@ -1,15 +1,5 @@
-import { expect, test, type Browser, type Page } from '@playwright/test'
-
-const newBoardUrl = () =>
-  `/b/e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-
-async function openBoard(browser: Browser, url: string): Promise<Page> {
-  const context = await browser.newContext()
-  const page = await context.newPage()
-  await page.goto(url)
-  await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
-  return page
-}
+import { expect, test, type Page } from '@playwright/test'
+import { newBoard, openBoard } from './helpers'
 
 const people = (page: Page) =>
   page.getByRole('list', { name: 'People on this board' }).getByRole('listitem')
@@ -20,7 +10,7 @@ const peers = (page: Page) =>
   )
 
 test('shows who is online and where their cursor is', async ({ browser }) => {
-  const url = newBoardUrl()
+  const { edit: url } = await newBoard()
   const alice = await openBoard(browser, url)
   await expect(people(alice)).toHaveCount(1)
 
@@ -46,7 +36,7 @@ test('shows who is online and where their cursor is', async ({ browser }) => {
 })
 
 test('says so when the connection drops, and recovers', async ({ browser }) => {
-  const page = await openBoard(browser, newBoardUrl())
+  const page = await openBoard(browser, (await newBoard()).edit)
   await expect(page.getByRole('status')).toHaveCount(0)
 
   // Cut the connection for real. (Playwright's offline mode leaves open

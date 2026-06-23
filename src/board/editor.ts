@@ -65,6 +65,8 @@ export interface EditorState {
   colorFamily: ColorFamily
   canUndo: boolean
   canRedo: boolean
+  /** View-only board: panning and zooming work, nothing can be changed. */
+  readOnly: boolean
   /** Bumps on every document change so the UI re-reads shapes. */
   docVersion: number
 }
@@ -159,6 +161,7 @@ export class Editor {
   constructor(store: BoardStore, options: EditorOptions = {}) {
     this.store = store
     this.measureText = options.measureText ?? ((text) => text.length * FONT_SIZE * 0.5)
+    if (store.readOnly) this.tool = 'hand'
     this.state = this.buildState()
     this.unsubscribeStore = store.subscribe(() => {
       this.docVersion++
@@ -240,6 +243,7 @@ export class Editor {
       colorFamily,
       canUndo: this.store.canUndo(),
       canRedo: this.store.canRedo(),
+      readOnly: this.store.readOnly,
       docVersion: this.docVersion,
     }
   }
@@ -252,6 +256,7 @@ export class Editor {
   // ---- Tools, colour, selection ----
 
   setTool(tool: Tool): void {
+    if (this.store.readOnly) return
     this.endEditing()
     this.tool = tool
     if (isShapeTool(tool)) this.selection = []
@@ -269,6 +274,7 @@ export class Editor {
   }
 
   selectAll(): void {
+    if (this.store.readOnly) return
     this.selection = this.store.list().map((s) => s.id)
     this.emit()
   }
@@ -347,6 +353,7 @@ export class Editor {
 
   startEditing(id: string): void {
     const shape = this.store.get(id)
+    if (this.store.readOnly) return
     if (!shape || shape.type === 'pen' || shape.type === 'arrow') return
     this.store.commit()
     this.selection = [id]

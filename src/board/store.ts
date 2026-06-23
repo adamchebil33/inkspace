@@ -4,6 +4,7 @@ import { COLORS, SHAPE_TYPES, type ColorName, type Shape, type ShapeType } from 
 export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points'>>
 
 const MAX_TEXT_LENGTH = 5000
+export const MAX_TITLE_LENGTH = 80
 /** Edits closer together than this merge into one undo step. */
 const UNDO_MERGE_MS = 600
 
@@ -86,17 +87,27 @@ export class BoardStore {
   /** Transaction origin for local edits, used to scope undo to this user. */
   readonly origin = { source: 'local' }
 
+  /**
+   * View-only boards never change the document locally. (The server also
+   * refuses writes from viewers; this keeps the local copy honest too.)
+   */
+  readonly readOnly: boolean
+
   private readonly shapes: Y.Map<Y.Map<unknown>>
+  private readonly meta: Y.Map<unknown>
   private readonly history: Y.UndoManager
   private readonly listeners = new Set<() => void>()
   private sorted: Shape[] | null = null
   private historyAvailability = 'false,false'
   private byId = new Map<string, Shape>()
 
-  constructor(doc: Y.Doc = new Y.Doc()) {
+  constructor(doc: Y.Doc = new Y.Doc(), options: { readOnly?: boolean } = {}) {
     this.doc = doc
+    this.readOnly = options.readOnly ?? false
     this.shapes = doc.getMap('shapes')
     this.shapes.observeDeep(this.handleChange)
+    this.meta = doc.getMap('meta')
+    this.meta.observe(this.handleChange)
 
     // Only transactions with our origin are tracked, so undo reverts this
     // person's edits and leaves everyone else's alone.
@@ -184,7 +195,19 @@ export class BoardStore {
 
   /** Group several edits into one atomic change (and one undo step). */
   transact(fn: () => void): void {
+    if (this.readOnly) return
     this.doc.transact(fn, this.origin)
+  }
+
+  // ---- Board title ----
+
+  getTitle(): string {
+    const title = this.meta.get('title')
+    return typeof title === 'string' ? title.slice(0, MAX_TITLE_LENGTH) : ''
+  }
+
+  setTitle(title: string): void {
+    this.transact(() => this.meta.set('title', title.slice(0, MAX_TITLE_LENGTH)))
   }
 
   // ---- Undo ----
@@ -221,6 +244,7 @@ export class BoardStore {
 
   destroy(): void {
     this.shapes.unobserveDeep(this.handleChange)
+    this.meta.unobserve(this.handleChange)
     this.history.destroy()
     this.listeners.clear()
   }

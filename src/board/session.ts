@@ -17,14 +17,17 @@ export interface BoardSession {
 
 /**
  * Create the document, editor and (not yet connected) sync client for a
- * board. Call `sync.connect()` to go live.
+ * board. Without an edit key the board is view-only. Call `sync.connect()`
+ * to go live.
  */
-export function createBoardSession(boardId: string): BoardSession {
+export function createBoardSession(boardId: string, editKey: string | null): BoardSession {
   const doc = new Y.Doc()
-  const editor = new Editor(new BoardStore(doc), { measureText })
+  const editor = new Editor(new BoardStore(doc, { readOnly: !editKey }), { measureText })
 
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-  const sync = new SyncClient(`${scheme}://${location.host}/api/ws/${boardId}`, doc)
+  // The edit key proves to the server that this connection may write.
+  const query = editKey ? `?key=${encodeURIComponent(editKey)}` : ''
+  const sync = new SyncClient(`${scheme}://${location.host}/api/ws/${boardId}${query}`, doc)
 
   // Share our cursor, selection and any pen stroke in progress. Presence drops repeats and throttles the
   // cursor, so it is fine to call this on every editor change (including

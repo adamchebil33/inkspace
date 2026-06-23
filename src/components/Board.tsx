@@ -1,17 +1,25 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createBoardSession } from '../board/session'
+import { rememberBoard } from '../lib/recentBoards'
 import { BoardCanvas } from './BoardCanvas'
+import { BoardHeader } from './BoardHeader'
 import { ConnectionStatus } from './ConnectionStatus'
-import { HistoryControls } from './HistoryControls'
 import { PresenceBar } from './PresenceBar'
+import { ShareMenu } from './ShareMenu'
 import { TextEditor } from './TextEditor'
 import { Toolbar } from './Toolbar'
 import { useShortcuts } from './useShortcuts'
 import { ZoomControls } from './ZoomControls'
 
-/** One board. Render with `key={boardId}` so a new id gets a fresh session. */
-export function Board({ boardId }: { boardId: string }) {
-  const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId))
+interface Props {
+  boardId: string
+  /** Null opens the board view-only. */
+  editKey: string | null
+}
+
+/** One board. Render with a `key` so a different board gets a fresh session. */
+export function Board({ boardId, editKey }: Props) {
+  const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId, editKey))
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
   useShortcuts(editor)
 
@@ -19,6 +27,16 @@ export function Board({ boardId }: { boardId: string }) {
     sync.connect()
     return () => sync.disconnect()
   }, [sync])
+
+  // Keep the home page's list of boards and the tab title up to date.
+  const title = editor.store.getTitle()
+  useEffect(() => {
+    rememberBoard({ id: boardId, editKey, title })
+    document.title = title ? `${title} · Inkspace` : 'Inkspace'
+    return () => {
+      document.title = 'Inkspace'
+    }
+  }, [boardId, editKey, title])
 
   // Exposed in development for console debugging and the end-to-end tests.
   useEffect(() => {
@@ -29,10 +47,14 @@ export function Board({ boardId }: { boardId: string }) {
     <div className="board">
       <BoardCanvas editor={editor} presence={presence} />
       <TextEditor editor={editor} state={state} />
-      <HistoryControls editor={editor} state={state} />
+      <BoardHeader editor={editor} state={state} />
       <ConnectionStatus sync={sync} />
-      <PresenceBar editor={editor} presence={presence} />
-      <Toolbar editor={editor} state={state} />
+      <div className="panel board-actions">
+        {state.readOnly && <span className="badge">View only</span>}
+        <PresenceBar editor={editor} presence={presence} />
+        <ShareMenu boardId={boardId} editKey={editKey} />
+      </div>
+      {!state.readOnly && <Toolbar editor={editor} state={state} />}
       <ZoomControls editor={editor} state={state} />
     </div>
   )

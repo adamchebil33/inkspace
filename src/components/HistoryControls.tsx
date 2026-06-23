@@ -12,7 +12,7 @@ const mod = isMac ? '⌘' : 'Ctrl+'
 /** Undo and redo. They only ever revert your own edits, never other people's. */
 export function HistoryControls({ editor, state }: Props) {
   return (
-    <div className="panel history" onMouseDown={(e) => e.preventDefault()}>
+    <div className="history" onMouseDown={(e) => e.preventDefault()}>
       <button
         type="button"
         className="tool"
