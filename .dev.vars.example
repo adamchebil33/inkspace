@@ -1,0 +1,7 @@
+# Local secrets for `npm run dev`. Copy this file to `.dev.vars` (which is
+# gitignored) and edit it there.
+#
+#   mock        -> canned summary, no account needed (the default here)
+#   <real key>  -> a free Gemini API key from https://aistudio.google.com/apikey
+#   (unset)     -> the Summarize button explains that AI is not set up
+GEMINI_API_KEY=mock

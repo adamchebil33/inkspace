@@ -6,6 +6,8 @@ import { BoardHeader } from './BoardHeader'
 import { ConnectionStatus } from './ConnectionStatus'
 import { PresenceBar } from './PresenceBar'
 import { ShareMenu } from './ShareMenu'
+import { SummaryPanel } from './SummaryPanel'
+import { SparklesIcon } from './icons'
 import { TextEditor } from './TextEditor'
 import { Toolbar } from './Toolbar'
 import { useShortcuts } from './useShortcuts'
@@ -22,6 +24,7 @@ export function Board({ boardId, editKey }: Props) {
   const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId, editKey))
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
   useShortcuts(editor)
+  const [summaryOpen, setSummaryOpen] = useState(false)
 
   useEffect(() => {
     sync.connect()
@@ -52,8 +55,26 @@ export function Board({ boardId, editKey }: Props) {
       <div className="panel board-actions">
         {state.readOnly && <span className="badge">View only</span>}
         <PresenceBar editor={editor} presence={presence} />
+        <button
+          type="button"
+          className="tool"
+          aria-label="Summarize board"
+          aria-pressed={summaryOpen}
+          title="Summarize the board with AI"
+          onClick={() => setSummaryOpen(!summaryOpen)}
+        >
+          <SparklesIcon />
+        </button>
         <ShareMenu boardId={boardId} editKey={editKey} />
       </div>
+      {summaryOpen && (
+        <SummaryPanel
+          boardId={boardId}
+          editor={editor}
+          readOnly={state.readOnly}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
       {!state.readOnly && <Toolbar editor={editor} state={state} />}
       <ZoomControls editor={editor} state={state} />
     </div>

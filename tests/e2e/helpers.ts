@@ -15,9 +15,17 @@ export async function newBoard(): Promise<BoardLinks> {
   return { edit: `/b/${id}#${key}`, view: `/b/${id}` }
 }
 
+const randomAddress = () =>
+  Array.from({ length: 4 }, () => Math.floor(Math.random() * 254) + 1).join('.')
+
 /** Each person gets their own browser context: separate storage, separate socket. */
 export async function openBoard(browser: Browser, url: string): Promise<Page> {
-  const context = await browser.newContext()
+  const context = await browser.newContext({
+    // The AI endpoint is rate limited per visitor address. Every test visitor
+    // would otherwise share one address and trip each other's limit. (In
+    // production Cloudflare sets this header itself, so it cannot be spoofed.)
+    extraHTTPHeaders: { 'CF-Connecting-IP': randomAddress() },
+  })
   const page = await context.newPage()
   await page.goto(url)
   await expect(page.getByRole('textbox', { name: 'Board title' })).toBeVisible()

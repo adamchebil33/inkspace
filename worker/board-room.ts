@@ -4,7 +4,10 @@ import * as encoding from 'lib0/encoding'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
 import { canEditBoard } from '../shared/boardKey'
+import type { BoardSummary, SummaryError, SummaryResponse } from '../shared/summary'
+import { summarizeNotes } from './ai'
 import { encodeAwarenessRemoval, readAwarenessUpdate, type AwarenessEntry } from './awareness'
+import { collectNotes } from './notes'
 
 // Top-level message types, shared with the client (src/board/sync-client.ts).
 const MESSAGE_SYNC = 0
@@ -24,6 +27,18 @@ const FLUSH_DELAY_MS = 1000
 const COMPACT_AFTER_ROWS = 50
 /** SQLite values are capped at 2 MB, so snapshots are stored in chunks. */
 const SNAPSHOT_CHUNK_BYTES = 1024 * 1024
+
+/** At most one new AI summary per board in this time. */
+const SUMMARY_COOLDOWN_MS = 15_000
+
+const STATUS_FOR_ERROR: Record<SummaryError, number> = {
+  empty: 400,
+  not_configured: 503,
+  rate_limited: 429,
+  failed: 502,
+}
+
+const summaryResponse = (body: SummaryResponse, status = 200) => Response.json(body, { status })
 
 /** Per-socket data. Stored on the socket itself so it survives hibernation. */
 interface Attachment {
@@ -47,6 +62,8 @@ export class BoardRoom extends DurableObject<Env> {
   private pending: Uint8Array[] = []
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private updateRows = 0
+  private lastSummary: { fingerprint: string; summary: BoardSummary } | null = null
+  private lastSummaryAt = 0
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -61,6 +78,7 @@ export class BoardRoom extends DurableObject<Env> {
   // ---- Connections ----
 
   async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname.endsWith('/summary')) return this.handleSummary()
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected a WebSocket upgrade', { status: 426 })
     }
@@ -135,6 +153,41 @@ export class BoardRoom extends DurableObject<Env> {
 
     // Last one out: save now rather than waiting for the timer.
     if (others.length === 0) this.flush()
+  }
+
+  // ---- AI summary ----
+
+  /**
+   * Summarize the notes on this board. The text comes from the document held
+   * here, not from the request, so the endpoint cannot be used as a free
+   * general-purpose AI proxy.
+   */
+  private async handleSummary(): Promise<Response> {
+    const notes = collectNotes(this.getDoc())
+    if (notes.length === 0) return summaryResponse({ ok: false, error: 'empty' }, 400)
+
+    // Same notes as last time: reuse the answer instead of paying for a new one.
+    const fingerprint = notes.join('\n')
+    if (this.lastSummary?.fingerprint === fingerprint) {
+      return summaryResponse({ ok: true, summary: this.lastSummary.summary })
+    }
+
+    const waitMs = this.lastSummaryAt + SUMMARY_COOLDOWN_MS - Date.now()
+    if (waitMs > 0) {
+      const retryAfterSeconds = Math.ceil(waitMs / 1000)
+      return summaryResponse({ ok: false, error: 'rate_limited', retryAfterSeconds }, 429)
+    }
+    this.lastSummaryAt = Date.now()
+
+    // The key is a secret that may not be set at all, so it is not part of
+    // the generated Env type.
+    const { GEMINI_API_KEY } = this.env as { GEMINI_API_KEY?: string }
+    const result = await summarizeNotes(notes, {
+      apiKey: GEMINI_API_KEY,
+      model: this.env.GEMINI_MODEL,
+    })
+    if (result.ok) this.lastSummary = { fingerprint, summary: result.summary }
+    return summaryResponse(result, result.ok ? 200 : STATUS_FOR_ERROR[result.error])
   }
 
   // ---- Protocol ----

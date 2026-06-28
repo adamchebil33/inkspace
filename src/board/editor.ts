@@ -11,6 +11,7 @@ import {
   screenToWorld,
   simplifyPoints,
   topShapeAt,
+  unionRects,
   zoomAt,
   type Camera,
   type Handle,
@@ -333,6 +334,53 @@ export class Editor {
     this.store.transact(() => {
       let z = to === 'front' ? this.store.topZ() : this.store.bottomZ() - shapes.length + 1
       for (const shape of shapes) this.store.update(shape.id, { z: z++ })
+    })
+  }
+
+  /**
+   * Add a batch of sticky notes (the AI's action items) in a grid to the
+   * right of everything on the board, select them and bring them into view.
+   */
+  addStickies(texts: readonly string[], coveredRight = 0, color: ColorName = 'green'): void {
+    if (texts.length === 0 || this.store.readOnly) return
+    this.endEditing()
+    const { w, h } = DEFAULT_SIZE.sticky
+    const gap = 24
+    const columns = Math.min(4, texts.length)
+    const bounds = unionRects(this.store.list())
+    const left = bounds ? bounds.x + bounds.w + gap * 3 : -((w + gap) * columns - gap) / 2
+    const top = bounds ? bounds.y : -h / 2
+
+    const ids: string[] = []
+    this.store.commit()
+    this.store.transact(() => {
+      let z = this.store.topZ()
+      texts.forEach((text, n) => {
+        const id = newId()
+        ids.push(id)
+        this.store.add({
+          id,
+          type: 'sticky',
+          x: left + (n % columns) * (w + gap),
+          y: top + Math.floor(n / columns) * (h + gap),
+          w,
+          h,
+          color,
+          text,
+          z: z++,
+        })
+      })
+    })
+    this.store.commit()
+
+    this.tool = 'select'
+    this.selection = ids
+    const rows = Math.ceil(texts.length / columns)
+    // `coveredRight` is how much of the screen's right side a panel hides;
+    // centre the notes in the part that is actually visible.
+    this.centerOn({
+      x: left + ((w + gap) * columns - gap) / 2 + coveredRight / 2 / this.camera.zoom,
+      y: top + ((h + gap) * rows - gap) / 2,
     })
   }
 

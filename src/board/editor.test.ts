@@ -351,3 +351,26 @@ describe('undo and redo', () => {
     expect(store.list()).toHaveLength(1)
   })
 })
+
+describe('addStickies', () => {
+  it('lays notes out in a grid beside existing content, as one undo step', () => {
+    drawRect(0, 0, 100, 100)
+    editor.addStickies(['One', 'Two', 'Three', 'Four', 'Five'])
+
+    const added = store.list().filter((s) => s.type === 'sticky')
+    expect(added.map((s) => s.text)).toEqual(['One', 'Two', 'Three', 'Four', 'Five'])
+    // Four per row, clear of the rectangle, with the fifth wrapping.
+    expect(added.every((s) => s.x > 100)).toBe(true)
+    expect(added[4]).toMatchObject({ x: added[0]!.x, y: added[0]!.y + 224 })
+    expect(editor.getState().selection).toHaveLength(5)
+
+    editor.undo()
+    expect(store.list()).toHaveLength(1)
+  })
+
+  it('does nothing on a view-only board', () => {
+    const viewer = new Editor(new BoardStore(undefined, { readOnly: true }))
+    viewer.addStickies(['Nope'])
+    expect(viewer.store.list()).toEqual([])
+  })
+})
