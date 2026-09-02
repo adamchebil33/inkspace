@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { boardIdForKey, newEditKey } from '../../shared/boardKey'
 import { Logo } from '../components/icons'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { forgetBoard, loadRecentBoards, timeAgo } from '../lib/recentBoards'
 import { boardPath, navigate } from '../lib/router'
 
@@ -21,6 +22,7 @@ export function Home() {
         <div className="wordmark">
           <Logo size={36} />
           <span>Inkspace</span>
+          <ThemeToggle />
         </div>
 
         <h1>A whiteboard for thinking together.</h1>

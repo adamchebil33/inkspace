@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { boardPath } from '../lib/router'
-import { EyeIcon, LinkIcon } from './icons'
+import { DownloadIcon, EyeIcon, LinkIcon } from './icons'
 
 interface Props {
   boardId: string
   /** Null on a view-only board, which can then only be shared view-only. */
   editKey: string | null
+  /** Save the board as an image. False if there was nothing to save. */
+  onExport: () => boolean
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -18,9 +20,9 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /** The two links for a board: one that lets people edit, one that doesn't. */
-export function ShareMenu({ boardId, editKey }: Props) {
+export function ShareMenu({ boardId, editKey, onExport }: Props) {
   const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState<'edit' | 'view' | 'failed' | null>(null)
+  const [copied, setCopied] = useState<'edit' | 'view' | 'failed' | 'empty' | null>(null)
   const root = useRef<HTMLDivElement>(null)
 
   // Close when clicking elsewhere or pressing Escape.
@@ -74,6 +76,22 @@ export function ShareMenu({ boardId, editKey }: Props) {
             <span>
               <strong>{copied === 'view' ? 'Copied!' : 'Copy view-only link'}</strong>
               <small>They can watch live but not change anything</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="share-option"
+            onClick={() => {
+              if (onExport()) setOpen(false)
+              else setCopied('empty')
+            }}
+          >
+            <DownloadIcon />
+            <span>
+              <strong>Download as PNG</strong>
+              <small>
+                {copied === 'empty' ? 'The board is empty' : 'An image of the whole board'}
+              </small>
             </span>
           </button>
           {copied === 'failed' && (

@@ -27,7 +27,9 @@ const isTyping = (target: EventTarget | null) =>
 export function useShortcuts(editor: Editor): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return
+      // Leave keys alone while typing, or while a modal dialog is open (it
+      // needs Escape for itself).
+      if (isTyping(e.target) || document.querySelector('dialog[open]')) return
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
       const mod = e.ctrlKey || e.metaKey
       const nudge = NUDGE[key]
@@ -42,6 +44,7 @@ export function useShortcuts(editor: Editor): void {
       else if (mod && key === 'y') editor.redo()
       else if (mod && key === 'a') editor.selectAll()
       else if (mod && key === 'd') editor.duplicateSelection()
+      else if (e.shiftKey && e.code === 'Digit1') editor.zoomToFit()
       else if (key === ']') editor.reorderSelection('front')
       else if (key === '[') editor.reorderSelection('back')
       else if (!mod && !e.altKey && TOOL_KEYS[key]) editor.setTool(TOOL_KEYS[key])

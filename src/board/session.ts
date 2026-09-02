@@ -39,5 +39,11 @@ export function createBoardSession(boardId: string, editKey: string | null): Boa
     presence.setSelection(editor.getState().selection)
   })
 
+  // A board that already has content opens framed around it, rather than on
+  // an empty patch of canvas (unless the user has already started moving).
+  sync.onceSynced(() => {
+    if (!editor.hasInteracted()) editor.zoomToFit()
+  })
+
   return { editor, sync, presence }
 }

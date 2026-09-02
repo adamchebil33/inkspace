@@ -1,6 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { downloadCanvas, exportFilename, renderBoardImage } from '../board/export'
 import { createBoardSession } from '../board/session'
+import { DARK_THEME, LIGHT_THEME } from '../board/theme'
 import { rememberBoard } from '../lib/recentBoards'
+import { getTheme } from '../lib/theme'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardHeader } from './BoardHeader'
 import { ConnectionStatus } from './ConnectionStatus'
@@ -65,7 +68,16 @@ export function Board({ boardId, editKey }: Props) {
         >
           <SparklesIcon />
         </button>
-        <ShareMenu boardId={boardId} editKey={editKey} />
+        <ShareMenu
+          boardId={boardId}
+          editKey={editKey}
+          onExport={() => {
+            const theme = getTheme() === 'dark' ? DARK_THEME : LIGHT_THEME
+            const image = renderBoardImage(editor.store.list(), theme)
+            if (image) downloadCanvas(image, exportFilename(title))
+            return image !== null
+          }}
+        />
       </div>
       {summaryOpen && (
         <SummaryPanel
@@ -74,6 +86,9 @@ export function Board({ boardId, editKey }: Props) {
           readOnly={state.readOnly}
           onClose={() => setSummaryOpen(false)}
         />
+      )}
+      {!state.readOnly && editor.store.list().length === 0 && (
+        <p className="empty-hint">Double-click anywhere to add a sticky note</p>
       )}
       {!state.readOnly && <Toolbar editor={editor} state={state} />}
       <ZoomControls editor={editor} state={state} />

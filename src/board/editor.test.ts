@@ -374,3 +374,42 @@ describe('addStickies', () => {
     expect(viewer.store.list()).toEqual([])
   })
 })
+
+describe('view', () => {
+  it('zooms out to fit everything, centred, but never past 100%', () => {
+    const rect = (id: string, x: number) =>
+      store.add({ id, type: 'rect', x, y: 0, w: 100, h: 100, color: 'blue', text: '', z: 0 })
+    editor.setViewport(1000, 800)
+
+    // Small content: stays at 100% and is centred.
+    rect('near', 0)
+    editor.zoomToFit()
+    expect(editor.getState().camera).toEqual({ zoom: 1, x: -450, y: -350 })
+
+    rect('far', 3000)
+    editor.zoomToFit()
+    const { camera } = editor.getState()
+    expect(camera.zoom).toBeCloseTo((1000 - 160) / 3100)
+    // The middle of the content is in the middle of the screen.
+    expect(camera.x + 500 / camera.zoom).toBeCloseTo(1550)
+  })
+
+  it('pinch zooms around the fingers and pans with them', () => {
+    const before = { x: 400, y: 300 }
+    editor.pinch(before, { x: 450, y: 300 }, 2)
+    const { camera } = editor.getState()
+    expect(camera.zoom).toBe(2)
+    // The world point that was between the fingers followed them.
+    expect((before.x - camera.x) * camera.zoom).toBeCloseTo(450)
+    expect((before.y - camera.y) * camera.zoom).toBeCloseTo(300)
+  })
+
+  it('drops an unfinished pen stroke when a gesture is cancelled', () => {
+    editor.setTool('pen')
+    editor.pointerDown(at(0, 0))
+    editor.pointerMove(at(50, 50))
+    editor.cancelGesture()
+    editor.pointerUp(at(50, 50))
+    expect(store.list()).toEqual([])
+  })
+})

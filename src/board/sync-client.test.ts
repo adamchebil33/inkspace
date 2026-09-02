@@ -127,6 +127,28 @@ describe('SyncClient', () => {
     expect(server.getMap('shapes').get('mine')).toBe(1)
   })
 
+  it('reports when the board has first arrived', () => {
+    const { client } = makeClient()
+    let synced = 0
+    client.onceSynced(() => synced++)
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    expect(synced).toBe(0)
+
+    // The server's reply to our step 1.
+    const encoder = encoding.createEncoder()
+    encoding.writeVarUint(encoder, SYNC)
+    syncProtocol.writeSyncStep2(encoder, new Y.Doc())
+    socket.receive(encoding.toUint8Array(encoder))
+    socket.receive(encoding.toUint8Array(encoder))
+    expect(synced).toBe(1)
+
+    // Late subscribers are called straight away.
+    client.onceSynced(() => synced++)
+    expect(synced).toBe(2)
+  })
+
   it('sends only its own presence, also when asked', () => {
     const { client } = makeClient()
     client.connect()

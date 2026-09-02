@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f7f7f5;
   --fg: #1c1c1a;
   --muted: #6b6b66;
@@ -17,18 +17,17 @@
     sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161618;
-    --fg: #ededeb;
-    --muted: #9a9a94;
-    --panel: #232326;
-    --panel-border: #38383d;
-    --hover: #313136;
-    --accent: #818cf8;
-    --accent-fg: #14141a;
-    --shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
-  }
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #161618;
+  --fg: #ededeb;
+  --muted: #9a9a94;
+  --panel: #232326;
+  --panel-border: #38383d;
+  --hover: #313136;
+  --accent: #818cf8;
+  --accent-fg: #14141a;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -148,27 +147,137 @@ button {
   position: absolute;
   right: 20px;
   bottom: 20px;
-  gap: 0;
+  gap: 2px;
   padding: 4px;
 }
 
-.zoom button {
-  min-width: 32px;
+.zoom .tool {
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+}
+
+.zoom-level {
+  width: 52px;
   height: 32px;
   border: 0;
   border-radius: 8px;
   background: transparent;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
-.zoom button:hover {
+.zoom-level:hover {
   background: var(--hover);
 }
 
-.zoom-level {
-  width: 56px;
+.divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--panel-border);
+}
+
+.empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 15px;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  /* Not during the moment an existing board is still loading. */
+  animation: appear 0.3s ease-out 0.8s both;
+}
+
+.wordmark .tool {
+  margin-left: auto;
+}
+
+/* ---- Keyboard shortcuts dialog ---- */
+
+.shortcuts {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.shortcuts::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.shortcuts-content {
+  padding: 12px 20px 20px;
+}
+
+.shortcuts header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.shortcuts h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px 28px;
+}
+
+.shortcuts h3 {
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.shortcuts dl {
+  margin: 0;
+}
+
+.shortcuts dl div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
   font-size: 13px;
-  font-variant-numeric: tabular-nums;
+}
+
+.shortcuts dt {
+  display: flex;
+  gap: 4px;
+  order: 2;
+  white-space: nowrap;
+}
+
+.shortcuts dd {
+  margin: 0;
+}
+
+kbd {
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--panel-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
 }
 
 button:focus-visible {

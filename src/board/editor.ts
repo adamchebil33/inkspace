@@ -152,6 +152,7 @@ export class Editor {
   private interaction: Interaction = { kind: 'idle' }
   private pointer: Point = { x: 0, y: 0 }
   private pointerInside = false
+  private interacted = false
   private docVersion = 0
 
   private state: EditorState
@@ -448,6 +449,7 @@ export class Editor {
   }
 
   wheel(input: WheelInput): void {
+    this.interacted = true
     if (input.zoom) {
       const factor = Math.exp(-input.deltaY * 0.01)
       this.camera = zoomAt(this.camera, input, this.camera.zoom * factor)
@@ -466,6 +468,48 @@ export class Editor {
     const center = { x: this.viewport.w / 2, y: this.viewport.h / 2 }
     this.camera = zoomAt(this.camera, center, clampZoom(zoom))
     this.emit()
+  }
+
+  /** Fit everything on the board into view, never zooming in past 100%. */
+  zoomToFit(): void {
+    const bounds = unionRects(this.store.list())
+    const { w, h } = this.viewport
+    if (!bounds || w === 0 || h === 0) return
+    const margin = 80
+    const zoom = clampZoom(Math.min(1, (w - margin * 2) / bounds.w, (h - margin * 2) / bounds.h))
+    this.camera = {
+      zoom,
+      x: bounds.x + bounds.w / 2 - w / 2 / zoom,
+      y: bounds.y + bounds.h / 2 - h / 2 / zoom,
+    }
+    this.emit()
+  }
+
+  /**
+   * Two-finger gesture on a touch screen: the point between the fingers moved
+   * from `from` to `to` (screen pixels) while they spread by `scale`.
+   */
+  pinch(from: Point, to: Point, scale: number): void {
+    this.interacted = true
+    const zoomed = zoomAt(this.camera, from, this.camera.zoom * scale)
+    this.camera = {
+      ...zoomed,
+      x: zoomed.x - (to.x - from.x) / zoomed.zoom,
+      y: zoomed.y - (to.y - from.y) / zoomed.zoom,
+    }
+    this.emit()
+  }
+
+  /** Drop whatever gesture is in progress (a second finger touched down). */
+  cancelGesture(): void {
+    this.interaction = { kind: 'idle' }
+    this.store.commit()
+    this.emit()
+  }
+
+  /** Has the user panned, zoomed or clicked yet? (Stops automatic framing.) */
+  hasInteracted(): boolean {
+    return this.interacted
   }
 
   /** Centre the view on a world point, e.g. to jump to someone's cursor. */
@@ -498,6 +542,7 @@ export class Editor {
 
   pointerDown(p: PointerInput): void {
     this.pointer = p
+    this.interacted = true
     this.pointerInside = true
     this.endEditing()
     const world = screenToWorld(this.camera, p)

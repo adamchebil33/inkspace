@@ -8,7 +8,24 @@
       content="Inkspace: a multiplayer whiteboard. Share a link and draw together live."
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="Inkspace" />
+    <meta
+      property="og:description"
+      content="A multiplayer whiteboard. Share a link and draw together live."
+    />
     <title>Inkspace</title>
+    <script>
+      // Pick the theme before first paint so the page never flashes the wrong one.
+      try {
+        var theme = localStorage.getItem('inkspace:theme')
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        document.documentElement.dataset.theme = theme
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

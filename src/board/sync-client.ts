@@ -50,6 +50,8 @@ export class SyncClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private readonly listeners = new Set<() => void>()
+  private synced = false
+  private readonly syncedCallbacks: (() => void)[] = []
 
   constructor(url: string, doc: Y.Doc, options: SyncClientOptions = {}) {
     this.url = url
@@ -97,6 +99,18 @@ export class SyncClient {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Run `callback` once the board's content has first arrived from the server. */
+  onceSynced(callback: () => void): void {
+    if (this.synced) callback()
+    else this.syncedCallbacks.push(callback)
+  }
+
+  private markSynced(): void {
+    if (this.synced) return
+    this.synced = true
+    for (const callback of this.syncedCallbacks.splice(0)) callback()
   }
 
   // ---- Connection lifecycle ----
@@ -200,7 +214,9 @@ export class SyncClient {
       const encoder = encoding.createEncoder()
       encoding.writeVarUint(encoder, MESSAGE_SYNC)
       // Applies incoming edits (with us as origin) and writes any reply.
-      syncProtocol.readSyncMessage(decoder, encoder, this.doc, this)
+      const step = syncProtocol.readSyncMessage(decoder, encoder, this.doc, this)
+      // Step 2 is the server's answer to our step 1: we now have the board.
+      if (step === syncProtocol.messageYjsSyncStep2) this.markSynced()
       if (encoding.length(encoder) > 1) this.send(encoding.toUint8Array(encoder))
     } else if (type === MESSAGE_AWARENESS) {
       applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this)

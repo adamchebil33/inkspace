@@ -3,6 +3,7 @@ import type { Editor, PointerInput } from '../board/editor'
 import { CursorSmoother, type Presence } from '../board/presence'
 import { render } from '../board/render'
 import { DARK_THEME, LIGHT_THEME } from '../board/theme'
+import { getTheme, subscribeTheme } from '../lib/theme'
 
 function toInput(e: PointerEvent | MouseEvent, canvas: HTMLCanvasElement): PointerInput {
   const rect = canvas.getBoundingClientRect()
@@ -23,7 +24,6 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
 
-    const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const smoother = new CursorSmoother()
     let frame = 0
 
@@ -36,7 +36,7 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
       const dpr = window.devicePixelRatio || 1
       const view = { width: canvas.clientWidth, height: canvas.clientHeight, dpr }
       const { peers, animating } = smoother.step(presence.getState().peers, now)
-      const theme = darkQuery.matches ? DARK_THEME : LIGHT_THEME
+      const theme = getTheme() === 'dark' ? DARK_THEME : LIGHT_THEME
       render(ctx, view, { ...editor.getRenderState(), peers }, theme)
       canvas.style.cursor = editor.getCursor()
       // Keep animating until every remote cursor has caught up.
@@ -71,7 +71,7 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
 
     const unsubscribe = editor.subscribe(schedule)
     const unsubscribePresence = presence.subscribe(schedule)
-    darkQuery.addEventListener('change', schedule)
+    const unsubscribeTheme = subscribeTheme(schedule)
 
     return () => {
       cancelAnimationFrame(frame)
@@ -79,16 +79,47 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
       canvas.removeEventListener('wheel', onWheel)
       unsubscribe()
       unsubscribePresence()
-      darkQuery.removeEventListener('change', schedule)
+      unsubscribeTheme()
     }
   }, [editor, presence])
 
+  // Fingers currently on the screen, for two-finger pan and pinch zoom.
+  const touches = useRef(new Map<number, { x: number; y: number }>())
+
+  const pinchState = () => {
+    const [a, b] = [...touches.current.values()]
+    if (!a || !b) return null
+    return {
+      center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      spread: Math.hypot(a.x - b.x, a.y - b.y),
+    }
+  }
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
-    editor.pointerDown(toInput(e.nativeEvent, e.currentTarget))
+    const input = toInput(e.nativeEvent, e.currentTarget)
+    if (e.pointerType === 'touch') {
+      touches.current.set(e.pointerId, input)
+      if (touches.current.size === 2) {
+        // The first finger may have started drawing or dragging; drop that.
+        editor.cancelGesture()
+        return
+      }
+      if (touches.current.size > 2) return
+    }
+    editor.pointerDown(input)
   }
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'touch' && touches.current.size >= 2) {
+      const before = pinchState()
+      touches.current.set(e.pointerId, toInput(e.nativeEvent, e.currentTarget))
+      const after = pinchState()
+      if (before && after && before.spread > 0) {
+        editor.pinch(before.center, after.center, after.spread / before.spread)
+      }
+      return
+    }
     // Browsers merge fast pointer moves into one event per frame. While
     // drawing, replay the merged samples so quick strokes stay smooth.
     const events = editor.isDrawing() ? e.nativeEvent.getCoalescedEvents() : []
@@ -97,14 +128,21 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
     }
   }
 
+  const onPointerEnd = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    const wasPinching = touches.current.size >= 2
+    touches.current.delete(e.pointerId)
+    // Lifting a finger after a pinch must not count as a click.
+    if (!wasPinching) editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))
+  }
+
   return (
     <canvas
       ref={ref}
       className="board-canvas"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
-      onPointerCancel={(e) => editor.pointerUp(toInput(e.nativeEvent, e.currentTarget))}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
       onPointerLeave={() => editor.pointerLeave()}
       onDoubleClick={(e) => editor.doubleClick(toInput(e.nativeEvent, e.currentTarget))}
       // Stops middle-click autoscroll and the context menu on the board.

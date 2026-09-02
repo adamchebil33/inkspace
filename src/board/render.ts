@@ -25,6 +25,8 @@ export interface RenderState {
   draft: Draft | null
   /** Other people on the board: their cursors and what they have selected. */
   peers: readonly Peer[]
+  /** Leave out the dot grid (image export). */
+  hideGrid?: boolean
 }
 
 export interface Viewport {
@@ -53,7 +55,7 @@ export function render(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, view.width, view.height)
-  drawGrid(ctx, view, camera, theme)
+  if (!state.hideGrid) drawGrid(ctx, view, camera, theme)
 
   // From here on, draw in world coordinates.
   ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * zoom * dpr, -camera.y * zoom * dpr)
