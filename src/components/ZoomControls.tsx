@@ -32,7 +32,7 @@ export function ZoomControls({ editor, state }: Props) {
         <span className="divider" />
         <button
           type="button"
-          className="tool"
+          className="tool zoom-step"
           aria-label="Zoom out"
           onClick={() => editor.setZoom(zoom / STEP)}
         >
@@ -48,7 +48,7 @@ export function ZoomControls({ editor, state }: Props) {
         </button>
         <button
           type="button"
-          className="tool"
+          className="tool zoom-step"
           aria-label="Zoom in"
           onClick={() => editor.setZoom(zoom * STEP)}
         >

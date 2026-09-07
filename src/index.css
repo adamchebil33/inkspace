@@ -285,8 +285,19 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-@media (max-width: 480px) {
+/* Below desktop width there is no room beside the toolbar, so the panel
+   moves under the header and keeps only help, theme and zoom-to-fit. */
+@media (max-width: 920px) {
   .zoom {
+    top: 72px;
+    right: auto;
+    bottom: auto;
+    left: 16px;
+  }
+
+  .zoom .zoom-step,
+  .zoom .zoom-level,
+  .zoom .divider {
     display: none;
   }
 }
