@@ -812,3 +812,51 @@ a:focus-visible {
   color: var(--muted);
   cursor: default;
 }
+
+/* Name field on the home page. */
+.name-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.name-field:focus-within {
+  border-color: var(--accent);
+}
+
+.name-field .avatar {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  font-size: 11px;
+  cursor: text;
+}
+
+.name-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.name-field .name-input {
+  width: 170px;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+}
+
+.name-field .name-input:focus {
+  outline: none;
+}
+
+.home-cta .hint {
+  flex-basis: 100%;
+}

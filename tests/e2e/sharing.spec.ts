@@ -91,3 +91,31 @@ test('creating a board from the home page and finding it again', async ({ browse
   await page.goto(editUrl.split('#')[0]!)
   await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
 })
+
+test('the home page shows your name, ready to keep or change', async ({ browser }) => {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await page.goto('/')
+
+  // A name is already filled in on the first visit.
+  const name = page.getByRole('textbox', { name: 'Your name' })
+  await expect(name).toHaveValue(/^\w+ \w+$/)
+  const defaultName = await name.inputValue()
+
+  // Keeping it: the board shows that name.
+  await page.getByRole('button', { name: 'New board' }).click()
+  await expect(page.getByRole('button', { name: `${defaultName} (you). Rename` })).toBeVisible()
+
+  // Changing it, then pressing Enter, opens a board under the new name.
+  await page.getByRole('link', { name: 'All boards' }).click()
+  await name.fill('Ada Lovelace')
+  await name.press('Enter')
+  await expect(page).toHaveURL(/\/b\//)
+  await expect(page.getByRole('button', { name: 'Ada Lovelace (you). Rename' })).toBeVisible()
+
+  // Clearing the field does not lose the name.
+  await page.getByRole('link', { name: 'All boards' }).click()
+  await name.fill('')
+  await name.blur()
+  await expect(name).toHaveValue('Ada Lovelace')
+})

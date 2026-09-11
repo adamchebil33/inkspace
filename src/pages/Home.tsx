@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { boardIdForKey, newEditKey } from '../../shared/boardKey'
 import { Logo } from '../components/icons'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { MAX_NAME_LENGTH, cleanName, initials, loadUser, saveUser } from '../lib/identity'
 import { forgetBoard, loadRecentBoards, timeAgo } from '../lib/recentBoards'
 import { boardPath, navigate } from '../lib/router'
 
@@ -15,6 +16,16 @@ async function createBoard(): Promise<void> {
 
 export function Home() {
   const [boards, setBoards] = useState(loadRecentBoards)
+
+  // Everyone gets a random name and colour on their first visit. It is shown
+  // here so it can be changed before joining a board, or simply kept.
+  const [user] = useState(loadUser)
+  const [name, setName] = useState(user.name)
+  const rename = (value: string) => {
+    setName(value)
+    // Saved as you type, so it applies however you open a board next.
+    if (cleanName(value)) saveUser({ ...user, name: cleanName(value) })
+  }
 
   return (
     <div className="home">
@@ -31,12 +42,32 @@ export function Home() {
           edits live. No sign-up.
         </p>
 
-        <div className="home-cta">
-          <button type="button" className="primary" onClick={() => void createBoard()}>
+        <form
+          className="home-cta"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void createBoard()
+          }}
+        >
+          <label className="name-field">
+            <span className="avatar" style={{ background: user.color }} aria-hidden="true">
+              {initials(name)}
+            </span>
+            <span className="name-label">Your name</span>
+            <input
+              className="name-input"
+              maxLength={MAX_NAME_LENGTH}
+              value={name}
+              onChange={(e) => rename(e.target.value)}
+              // Left empty: fall back to the name we had.
+              onBlur={() => setName(loadUser().name)}
+            />
+          </label>
+          <button type="submit" className="primary">
             New board
           </button>
           <span className="hint">Tip: open your board in two windows to watch them sync.</span>
-        </div>
+        </form>
 
         <Preview />
 
