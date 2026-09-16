@@ -172,6 +172,12 @@ export class BoardRoom extends DurableObject<Env> {
       return summaryResponse({ ok: true, summary: this.lastSummary.summary })
     }
 
+    // The key is a secret that may not be set at all, so it is not part of
+    // the generated Env type. Check it before the cooldown: with no key there
+    // is no model call to protect, and "not set up" is the useful answer.
+    const { GEMINI_API_KEY } = this.env as { GEMINI_API_KEY?: string }
+    if (!GEMINI_API_KEY) return summaryResponse({ ok: false, error: 'not_configured' }, 503)
+
     const waitMs = this.lastSummaryAt + SUMMARY_COOLDOWN_MS - Date.now()
     if (waitMs > 0) {
       const retryAfterSeconds = Math.ceil(waitMs / 1000)
@@ -179,9 +185,6 @@ export class BoardRoom extends DurableObject<Env> {
     }
     this.lastSummaryAt = Date.now()
 
-    // The key is a secret that may not be set at all, so it is not part of
-    // the generated Env type.
-    const { GEMINI_API_KEY } = this.env as { GEMINI_API_KEY?: string }
     const result = await summarizeNotes(notes, {
       apiKey: GEMINI_API_KEY,
       model: this.env.GEMINI_MODEL,
