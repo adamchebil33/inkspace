@@ -14,8 +14,8 @@ offline merge when the connection returns, and undo only reverts your own change
 
 - **Live collaboration.** Edits, cursors, selections and even half-drawn pen strokes show
   up for everyone immediately.
-- **Conflict-free.** Two people can move, recolour and retype the same note at once, or
-  work offline, and every copy of the board ends up identical.
+- **Conflict-free.** Two people can move, recolour and type in the same note at once, or
+  work offline. Both people's changes are kept and every copy of the board ends up identical.
 - **A real canvas editor.** Pan and zoom, marquee select, move, resize, duplicate,
   reorder, keyboard shortcuts, touch pinch zoom, light and dark themes.
 - **Per-person undo.** Undo and redo step through your own edits and leave everyone
@@ -51,7 +51,8 @@ The interesting parts, with pointers into the code:
 
 The board is a [Yjs](https://yjs.dev) document. Each shape is its own map inside it, so
 edits to different properties of one shape merge instead of overwriting each other: one
-person moves a note while another recolours it, and both changes survive. Because merging
+person moves a note while another recolours it, and both changes survive. A note's text
+is a shared text type, so two people typing in it are merged character by character. Because merging
 is built into the data structure, being offline needs no special code. Edits apply
 locally, and on reconnect the two sides exchange whatever the other is missing.
 ([`src/board/store.ts`](src/board/store.ts))
@@ -213,8 +214,6 @@ tests/e2e/        Playwright tests
 
 ## Known limitations
 
-- Text inside a note is last-write-wins: if two people type in the same note at the same
-  moment, one version is kept.
 - Arrows do not stay attached to the shapes they point at.
 - Anyone with an edit link can edit; links cannot be revoked.
 - The list of recent boards lives in the browser, not in an account.

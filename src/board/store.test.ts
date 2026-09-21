@@ -102,18 +102,56 @@ describe('two clients', () => {
     expect(b.get('a')).toMatchObject(expected)
   })
 
+  it('merge text typed into the same note at the same time', () => {
+    const a = new BoardStore()
+    a.add(shape({ text: 'Buy milk' }))
+    const b = new BoardStore()
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
+
+    // Offline from each other: one adds to the start, the other to the end.
+    a.update('a', { text: 'TODO: Buy milk' })
+    b.update('a', { text: 'Buy milk and eggs' })
+
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
+    Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc))
+
+    expect(a.get('a')?.text).toBe('TODO: Buy milk and eggs')
+    expect(b.get('a')?.text).toBe('TODO: Buy milk and eggs')
+  })
+
+  it('still reads and upgrades text saved as a plain string', () => {
+    const store = new BoardStore()
+    store.add(shape())
+    const map = store.doc.getMap('shapes').get('a') as Y.Map<unknown>
+    map.set('text', 'old format')
+    expect(store.get('a')?.text).toBe('old format')
+
+    store.update('a', { text: 'old format, edited' })
+    expect(map.get('text')).toBeInstanceOf(Y.Text)
+    expect(store.get('a')?.text).toBe('old format, edited')
+  })
+
+  it('undoes typing', () => {
+    const store = new BoardStore()
+    store.add(shape({ text: 'one' }))
+    store.commit()
+    store.update('a', { text: 'one two' })
+    store.undo()
+    expect(store.get('a')?.text).toBe('one')
+  })
+
   it('converge when both edit the same property', () => {
     const a = new BoardStore()
     a.add(shape())
     const b = new BoardStore()
     Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
 
-    a.update('a', { text: 'from a' })
-    b.update('a', { text: 'from b' })
+    a.update('a', { color: 'red' })
+    b.update('a', { color: 'green' })
     Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
     Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc))
 
-    expect(a.get('a')?.text).toBe(b.get('a')?.text)
+    expect(a.get('a')?.color).toBe(b.get('a')?.color)
   })
 })
 

@@ -58,3 +58,38 @@ test('edits made offline are merged after reconnecting', async ({ browser }) => 
     await expect.poll(async () => (await shapes(page)).map((s) => s.text).sort()).toEqual(expected)
   }
 })
+
+test('two people typing in the same note keep both their words', async ({ browser }) => {
+  const board = await newBoard()
+  const alice = await openBoard(browser, board.edit)
+  const bob = await openBoard(browser, board.edit)
+  await addSticky(alice, 400, 300, 'middle')
+  await expect.poll(() => shapes(bob)).toMatchObject([{ text: 'middle' }])
+
+  // Both open the note for editing. Alice's caret is at the end.
+  await alice.mouse.dblclick(400, 300)
+  await bob.mouse.dblclick(400, 300)
+  const aliceField = alice.getByRole('textbox', { name: 'Shape text' })
+  const bobField = bob.getByRole('textbox', { name: 'Shape text' })
+  await expect(aliceField).toBeFocused()
+  await expect(bobField).toBeFocused()
+
+  // Bob types at the start while Alice types at the end, interleaved.
+  await bob.keyboard.press('Control+Home')
+  for (const [a, b] of [
+    [' e', 's'],
+    ['n', 't'],
+    ['d', 'art '],
+  ]) {
+    await alice.keyboard.type(a!)
+    await bob.keyboard.type(b!)
+  }
+
+  for (const page of [alice, bob]) {
+    await expect.poll(() => shapes(page)).toMatchObject([{ text: 'start middle end' }])
+  }
+  // Each person's caret stayed with their own words, so what they see in the
+  // field is the merged text too.
+  await expect(aliceField).toHaveValue('start middle end')
+  await expect(bobField).toHaveValue('start middle end')
+})

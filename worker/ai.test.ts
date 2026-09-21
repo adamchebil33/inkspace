@@ -105,8 +105,9 @@ describe('collectNotes', () => {
       { type: 'sticky', text: '  Talk to\nfive   users ' },
       { type: 'pen', text: '' },
       { type: 'sticky', text: 42 },
+      { type: 'sticky', text: new Y.Text('Typed together') },
     ])
-    expect(collectNotes(doc)).toEqual(['Talk to five users', 'Box label'])
+    expect(collectNotes(doc)).toEqual(['Talk to five users', 'Typed together', 'Box label'])
   })
 
   it('caps how much text is sent', () => {

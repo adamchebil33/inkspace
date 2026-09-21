@@ -1,7 +1,16 @@
-import type { CSSProperties } from 'react'
+import { useLayoutEffect, useRef, type CSSProperties } from 'react'
 import type { Editor, EditorState } from '../board/editor'
 import { worldToScreen } from '../board/geometry'
-import { FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, textScale, textWidth, wrapText } from '../board/text'
+import {
+  FONT_FAMILY,
+  FONT_SIZE,
+  LINE_HEIGHT,
+  diffText,
+  shiftCaret,
+  textScale,
+  textWidth,
+  wrapText,
+} from '../board/text'
 import { PALETTE, SHAPE_TEXT_COLOR } from '../board/theme'
 import { measureText } from '../lib/measure'
 
@@ -16,6 +25,31 @@ interface Props {
  */
 export function TextEditor({ editor, state }: Props) {
   const shape = state.editingId ? editor.store.get(state.editingId) : undefined
+
+  // What the field held, and where the caret was, the last time we looked.
+  const field = useRef<HTMLTextAreaElement>(null)
+  const seen = useRef({ id: '', value: '', start: 0, end: 0 })
+  const remember = (id: string) => {
+    const el = field.current
+    if (el) seen.current = { id, value: el.value, start: el.selectionStart, end: el.selectionEnd }
+  }
+
+  // Someone else can type into the same shape. When the text changes under
+  // us the browser throws the caret to the end; put it back where it was,
+  // shifted by whatever they inserted or removed before it.
+  const id = shape?.id
+  const text = shape?.text
+  useLayoutEffect(() => {
+    const el = field.current
+    if (!el || id === undefined || text === undefined) return
+    const before = seen.current
+    if (before.id === id && before.value !== text) {
+      const edit = diffText(before.value, text)
+      if (edit) el.setSelectionRange(shiftCaret(before.start, edit), shiftCaret(before.end, edit))
+    }
+    remember(id)
+  }, [id, text])
+
   if (!shape) return null
 
   const { zoom } = state.camera
@@ -61,10 +95,18 @@ export function TextEditor({ editor, state }: Props) {
       value={shape.text}
       placeholder={shape.type === 'sticky' ? 'Type something' : ''}
       style={style}
-      onChange={(e) => editor.setText(shape.id, e.target.value)}
+      ref={field}
+      onChange={(e) => {
+        // Record our own edit first, so the effect above does not mistake it
+        // for someone else's.
+        remember(shape.id)
+        editor.setText(shape.id, e.target.value)
+      }}
+      onSelect={() => remember(shape.id)}
       onFocus={(e) => {
         const end = e.target.value.length
         e.target.setSelectionRange(end, end)
+        remember(shape.id)
       }}
       onBlur={() => editor.stopEditing()}
       onKeyDown={(e) => {

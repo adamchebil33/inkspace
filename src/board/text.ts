@@ -57,3 +57,49 @@ export function textBlockSize(
 export function textScale(shape: Pick<Shape, 'text' | 'h'>): number {
   return shape.h / (shape.text.split('\n').length * LINE_HEIGHT)
 }
+
+/** One contiguous edit: at `index`, `remove` characters were replaced by `insert`. */
+export interface TextEdit {
+  index: number
+  remove: number
+  insert: string
+}
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+/**
+ * The smallest single edit that turns `before` into `after`: whatever lies
+ * between their common start and common end. Typing, deleting and pasting in
+ * a text field are always one such edit, which is what lets two people's
+ * changes to the same text be merged instead of one replacing the other.
+ */
+export function diffText(before: string, after: string): TextEdit | null {
+  if (before === after) return null
+  const max = Math.min(before.length, after.length)
+
+  let start = 0
+  while (start < max && before[start] === after[start]) start++
+  // Never cut an emoji (a surrogate pair) in half.
+  if (start > 0 && isHighSurrogate(before.charCodeAt(start - 1))) start--
+
+  let end = 0
+  while (end < max - start && before[before.length - 1 - end] === after[after.length - 1 - end]) {
+    end++
+  }
+  if (end > 0 && isLowSurrogate(before.charCodeAt(before.length - end))) end--
+
+  return {
+    index: start,
+    remove: before.length - start - end,
+    insert: after.slice(start, after.length - end),
+  }
+}
+
+/** Where a caret at `position` ends up after `edit` is applied to the text. */
+export function shiftCaret(position: number, edit: TextEdit): number {
+  if (position <= edit.index) return position
+  if (position >= edit.index + edit.remove) return position + edit.insert.length - edit.remove
+  // The caret was inside the replaced part: put it after the replacement.
+  return edit.index + edit.insert.length
+}

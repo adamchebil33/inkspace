@@ -1,4 +1,4 @@
-import type * as Y from 'yjs'
+import * as Y from 'yjs'
 
 const MAX_NOTES = 200
 const MAX_NOTE_LENGTH = 500
@@ -14,7 +14,9 @@ export function collectNotes(doc: Y.Doc): string[] {
   const others: string[] = []
 
   doc.getMap<Y.Map<unknown>>('shapes').forEach((shape) => {
-    const text = shape.get('text')
+    // Text is a Y.Text; boards saved by older versions hold a plain string.
+    const value = shape.get('text')
+    const text = value instanceof Y.Text ? value.toString() : value
     if (typeof text !== 'string') return
     // Collapse whitespace so a note is always a single line in the prompt.
     const clean = text.replace(/\s+/g, ' ').trim().slice(0, MAX_NOTE_LENGTH)

@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { diffText } from './text'
 import { COLORS, SHAPE_TYPES, type ColorName, type Shape, type ShapeType } from './types'
 
 export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points'>>
@@ -33,7 +34,7 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
     id,
     type: type as ShapeType,
     color: color as ColorName,
-    text: typeof text === 'string' ? text.slice(0, MAX_TEXT_LENGTH) : '',
+    text: readText(text).slice(0, MAX_TEXT_LENGTH),
     x,
     y,
     w,
@@ -51,6 +52,16 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
     shape.flipY = map.get('flipY') === true
   }
   return shape
+}
+
+/**
+ * A shape's text is a Y.Text, so two people typing in the same note are
+ * merged character by character. (Boards saved before that hold a plain
+ * string, which is still read, and upgraded on the next edit.)
+ */
+function readText(value: unknown): string {
+  if (value instanceof Y.Text) return value.toString()
+  return typeof value === 'string' ? value : ''
 }
 
 // Pen points are stored as integers in tenths of a unit: integers encode in
@@ -171,7 +182,9 @@ export class BoardStore {
       const map = new Y.Map<unknown>()
       for (const [key, value] of Object.entries(shape)) {
         if (key === 'id' || value === undefined) continue
-        map.set(key, key === 'points' ? encodePoints(value as number[]) : value)
+        if (key === 'points') map.set(key, encodePoints(value as number[]))
+        else if (key === 'text') map.set(key, new Y.Text(String(value).slice(0, MAX_TEXT_LENGTH)))
+        else map.set(key, value)
       }
       this.shapes.set(shape.id, map)
     })
@@ -182,9 +195,27 @@ export class BoardStore {
       const map = this.shapes.get(id)
       if (!map) return
       for (const [key, value] of Object.entries(patch)) {
-        if (value !== undefined && map.get(key) !== value) map.set(key, value)
+        if (value === undefined) continue
+        if (key === 'text') this.editText(map, String(value).slice(0, MAX_TEXT_LENGTH))
+        else if (map.get(key) !== value) map.set(key, value)
       }
     })
+  }
+
+  /**
+   * Change a shape's text by applying only what differs. Replacing the whole
+   * value would discard whatever someone else typed at the same moment.
+   */
+  private editText(map: Y.Map<unknown>, text: string): void {
+    const current = map.get('text')
+    if (!(current instanceof Y.Text)) {
+      map.set('text', new Y.Text(text))
+      return
+    }
+    const edit = diffText(current.toString(), text)
+    if (!edit) return
+    if (edit.remove > 0) current.delete(edit.index, edit.remove)
+    if (edit.insert) current.insert(edit.index, edit.insert)
   }
 
   remove(ids: readonly string[]): void {
