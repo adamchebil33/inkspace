@@ -238,3 +238,79 @@ describe('undo', () => {
     expect(seen.at(-1)).toBe(true)
   })
 })
+
+describe('attached arrows', () => {
+  const left = shape({ id: 'left', x: 0, y: 0, w: 100, h: 100 })
+  const right = shape({ id: 'right', x: 300, y: 0, w: 100, h: 100 })
+  // Stored geometry is deliberately wrong: attached ends must not use it.
+  const arrow = shape({
+    id: 'arrow',
+    type: 'arrow',
+    x: -999,
+    y: -999,
+    w: 1,
+    h: 1,
+    flipX: false,
+    flipY: false,
+    startId: 'left',
+    endId: 'right',
+  })
+
+  it('runs between the edges of the two shapes, with a small gap', () => {
+    const store = new BoardStore()
+    for (const s of [left, right, arrow]) store.add(s)
+    expect(store.get('arrow')).toMatchObject({ x: 106, y: 50, w: 188, h: 0, flipX: false })
+  })
+
+  it('follows a shape that moves, without the arrow being edited', () => {
+    const [a, b] = connectedPair()
+    for (const s of [left, right, arrow]) a.add(s)
+    b.update('right', { x: 300, y: 400 })
+
+    for (const store of [a, b]) {
+      const resolved = store.get('arrow')!
+      // Head now points down and to the right, at the moved shape.
+      expect(resolved.x + resolved.w).toBeGreaterThan(300)
+      expect(resolved.y + resolved.h).toBeGreaterThan(300)
+    }
+    expect(a.get('arrow')).toEqual(b.get('arrow'))
+  })
+
+  it('stays consistent when two people move the two shapes at once', () => {
+    const a = new BoardStore()
+    for (const s of [left, right, arrow]) a.add(s)
+    const b = new BoardStore()
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
+
+    a.update('left', { y: -200 })
+    b.update('right', { y: 200 })
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc))
+    Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc))
+
+    expect(a.get('arrow')).toEqual(b.get('arrow'))
+    expect(a.get('arrow')).toMatchObject({ flipY: false })
+    expect(a.get('arrow')!.h).toBeGreaterThan(200)
+  })
+
+  it('keeps a free end where it was stored', () => {
+    const store = new BoardStore()
+    store.add(left)
+    store.add({ ...arrow, x: 100, y: 50, w: 200, h: 0, endId: undefined })
+    // Tail on the edge of the shape, head at the stored point (300, 50).
+    expect(store.get('arrow')).toMatchObject({ x: 106, y: 50, w: 194, h: 0 })
+  })
+
+  it('falls back to its stored position when the shape it pointed at is gone', () => {
+    const store = new BoardStore()
+    store.add({ ...arrow, x: 10, y: 20, w: 30, h: 40 })
+    expect(store.get('arrow')).toMatchObject({ x: 10, y: 20, w: 30, h: 40 })
+  })
+
+  it('detaches an end when asked', () => {
+    const store = new BoardStore()
+    for (const s of [left, right, arrow]) store.add(s)
+    store.update('arrow', { endId: null })
+    expect(store.get('arrow')?.endId).toBeUndefined()
+    expect(store.get('arrow')?.startId).toBe('left')
+  })
+})

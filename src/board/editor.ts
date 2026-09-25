@@ -20,7 +20,7 @@ import {
 } from './geometry'
 import type { Draft } from './presence'
 import { HANDLE_SIZE, type RenderState } from './render'
-import type { BoardStore } from './store'
+import type { BoardStore, ShapePatch } from './store'
 import { FONT_SIZE, LINE_HEIGHT, textBlockSize, textScale } from './text'
 import {
   isBoxType,
@@ -84,14 +84,22 @@ type Interaction =
       kind: 'move'
       startScreen: Point
       startWorld: Point
-      originals: Map<string, Point>
+      originals: Map<string, Shape>
       dragged: boolean
       /** Plain click on an already-selected shape narrows the selection to it. */
       collapseTo: string | null
     }
   | { kind: 'resize'; id: string; handle: Handle; startWorld: Point; original: Rect }
   /** Dragging one end of an arrow while the other stays put. */
-  | { kind: 'endpoint'; id: string; fixed: Point; moving: 'start' | 'end'; creating: boolean }
+  | {
+      kind: 'endpoint'
+      id: string
+      fixed: Point
+      moving: 'start' | 'end'
+      creating: boolean
+      /** Shape under the pointer that the moving end is attached to. */
+      targetId: string | null
+    }
   | { kind: 'marquee'; startWorld: Point; currentWorld: Point; base: readonly string[] }
   | { kind: 'create'; type: ShapeType; startScreen: Point; startWorld: Point; id: string | null }
   /** Pen stroke in progress: flat x, y pairs in world coordinates. */
@@ -129,6 +137,32 @@ const newId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16)
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
 const familyOf = (type: ShapeType): ColorFamily => (isBoxType(type) ? 'fill' : 'ink')
+
+/**
+ * The edit that moves a shape by (dx, dy). An attached arrow end follows its
+ * shape, so it only stays attached if that shape is `kept` (moving along, or
+ * not being deleted); otherwise the end is set free at its current position.
+ */
+function movedPatch(
+  shape: Shape,
+  dx: number,
+  dy: number,
+  kept: (id: string) => boolean,
+): ShapePatch {
+  const position = { x: shape.x + dx, y: shape.y + dy }
+  if (shape.type !== 'arrow' || (!shape.startId && !shape.endId)) return position
+  // Write the whole geometry: what is stored for an attached arrow can be
+  // out of date, because its real position is worked out from its shapes.
+  return {
+    ...position,
+    w: shape.w,
+    h: shape.h,
+    flipX: shape.flipX,
+    flipY: shape.flipY,
+    startId: shape.startId && kept(shape.startId) ? shape.startId : null,
+    endId: shape.endId && kept(shape.endId) ? shape.endId : null,
+  }
+}
 
 const isShapeTool = (tool: Tool): tool is ShapeType => tool !== 'select' && tool !== 'hand'
 
@@ -198,6 +232,7 @@ export class Editor {
       marquee: i.kind === 'marquee' ? rectFromPoints(i.startWorld, i.currentWorld) : null,
       editingId: this.editingId,
       draft: this.getDraft(),
+      attachTargetId: i.kind === 'endpoint' ? i.targetId : null,
     }
   }
 
@@ -291,38 +326,61 @@ export class Editor {
   }
 
   deleteSelection(): void {
+    const doomed = new Set(this.selection)
+    // Arrows attached to something being deleted stay where they are drawn
+    // now, with that end set free.
+    const orphaned = this.store
+      .list()
+      .filter((s) => !doomed.has(s.id) && this.attachments(s).some((id) => doomed.has(id)))
     this.store.commit()
-    this.store.remove(this.selection)
+    this.store.transact(() => {
+      for (const arrow of orphaned) {
+        this.store.update(
+          arrow.id,
+          movedPatch(arrow, 0, 0, (id) => !doomed.has(id)),
+        )
+      }
+      this.store.remove(this.selection)
+    })
   }
 
   duplicateSelection(): void {
-    const copies: string[] = []
+    const originals = this.selection
+      .map((id) => this.store.get(id))
+      .filter((shape): shape is Shape => shape !== undefined)
+    const copyId = new Map(originals.map((shape) => [shape.id, newId()]))
+
     this.store.commit()
     this.store.transact(() => {
       let z = this.store.topZ()
-      for (const id of this.selection) {
-        const shape = this.store.get(id)
-        if (!shape) continue
-        const copy: Shape = {
+      for (const shape of originals) {
+        this.store.add({
           ...shape,
-          id: newId(),
+          id: copyId.get(shape.id)!,
           x: shape.x + DUPLICATE_OFFSET,
           y: shape.y + DUPLICATE_OFFSET,
           z: z++,
-        }
-        this.store.add(copy)
-        copies.push(copy.id)
+          // A copied arrow attaches to the copies of its shapes, if they were
+          // copied too; otherwise that end is free.
+          startId: shape.startId && copyId.get(shape.startId),
+          endId: shape.endId && copyId.get(shape.endId),
+        })
       }
     })
-    this.selection = copies
+    this.selection = [...copyId.values()]
     this.emit()
   }
 
   nudgeSelection(dx: number, dy: number): void {
+    const moving = new Set(this.selection)
     this.store.transact(() => {
       for (const id of this.selection) {
         const shape = this.store.get(id)
-        if (shape) this.store.update(id, { x: shape.x + dx, y: shape.y + dy })
+        if (shape)
+          this.store.update(
+            id,
+            movedPatch(shape, dx, dy, (other) => moving.has(other)),
+          )
       }
     })
   }
@@ -588,6 +646,7 @@ export class Editor {
         moving: grab.moving,
         fixed: grab.moving === 'end' ? start : end,
         creating: false,
+        targetId: null,
       }
       return
     }
@@ -608,10 +667,10 @@ export class Editor {
     if (p.shift) this.selection = [...this.selection, hit.id]
     else if (!wasSelected) this.selection = [hit.id]
 
-    const originals = new Map<string, Point>()
+    const originals = new Map<string, Shape>()
     for (const id of this.selection) {
       const shape = this.store.get(id)
-      if (shape) originals.set(id, { x: shape.x, y: shape.y })
+      if (shape) originals.set(id, shape)
     }
     this.interaction = {
       kind: 'move',
@@ -644,8 +703,11 @@ export class Editor {
         const dx = world.x - i.startWorld.x
         const dy = world.y - i.startWorld.y
         this.store.transact(() => {
-          for (const [id, start] of i.originals) {
-            this.store.update(id, { x: start.x + dx, y: start.y + dy })
+          for (const [id, original] of i.originals) {
+            this.store.update(
+              id,
+              movedPatch(original, dx, dy, (other) => i.originals.has(other)),
+            )
           }
         })
         break
@@ -665,10 +727,7 @@ export class Editor {
       }
 
       case 'endpoint':
-        this.store.update(
-          i.id,
-          i.moving === 'end' ? arrowFromEnds(i.fixed, world) : arrowFromEnds(world, i.fixed),
-        )
+        this.moveEndpoint(i, world)
         break
 
       case 'marquee': {
@@ -699,6 +758,20 @@ export class Editor {
     this.emit()
   }
 
+  /** Put the dragged end of an arrow at `world`, attaching it if it is over a shape. */
+  private moveEndpoint(i: Interaction & { kind: 'endpoint' }, world: Point): void {
+    const arrow = this.store.get(i.id)
+    const otherEnd = i.moving === 'end' ? arrow?.startId : arrow?.endId
+    const target = this.attachableAt(world, i.id)
+    // Both ends on the same shape would be a zero-length arrow; leave it free.
+    i.targetId = target && target.id !== otherEnd ? target.id : null
+    const box = i.moving === 'end' ? arrowFromEnds(i.fixed, world) : arrowFromEnds(world, i.fixed)
+    this.store.update(i.id, {
+      ...box,
+      ...(i.moving === 'end' ? { endId: i.targetId } : { startId: i.targetId }),
+    })
+  }
+
   private dragCreate(i: Interaction & { kind: 'create' }, p: PointerInput, world: Point): void {
     if (i.id) {
       this.store.update(i.id, rectFromPoints(i.startWorld, world))
@@ -709,14 +782,22 @@ export class Editor {
 
     if (i.type === 'arrow') {
       // From here on it is the same gesture as dragging an arrow's head.
-      const id = this.createShape('arrow', arrowFromEnds(i.startWorld, world))
-      this.interaction = {
+      // Starting on a shape attaches the tail to it.
+      const id = this.createShape('arrow', {
+        ...arrowFromEnds(i.startWorld, world),
+        startId: this.attachableAt(i.startWorld)?.id,
+      })
+      const endpoint: Interaction & { kind: 'endpoint' } = {
         kind: 'endpoint',
         id,
         fixed: i.startWorld,
         moving: 'end',
         creating: true,
+        targetId: null,
       }
+      this.interaction = endpoint
+      // The pointer may already be over another shape.
+      this.moveEndpoint(endpoint, world)
       return
     }
     i.id = this.createShape(i.type, rectFromPoints(i.startWorld, world))
@@ -820,7 +901,10 @@ export class Editor {
 
   // ---- Helpers ----
 
-  private createShape(type: ShapeType, box: Rect & { flipX?: boolean; flipY?: boolean }): string {
+  private createShape(
+    type: ShapeType,
+    box: Rect & Pick<Shape, 'flipX' | 'flipY' | 'startId' | 'endId'>,
+  ): string {
     const id = newId()
     const color = this.colors[familyOf(type)]
     this.store.add({ id, type, ...box, color, text: '', z: this.store.topZ() })
@@ -831,6 +915,19 @@ export class Editor {
   /** Topmost shape under a world point, with some slack for thin lines. */
   private shapeAt(world: Point): Shape | undefined {
     return topShapeAt(this.store.list(), world, LINE_HIT_TOLERANCE / this.camera.zoom)
+  }
+
+  /** Topmost shape an arrow end can attach to at a world point. */
+  private attachableAt(world: Point, arrowId?: string): Shape | undefined {
+    const candidates = this.store
+      .list()
+      .filter((s) => s.type !== 'arrow' && s.type !== 'pen' && s.id !== arrowId)
+    return topShapeAt(candidates, world)
+  }
+
+  /** Ids of the shapes an arrow is attached to (empty for anything else). */
+  private attachments(shape: Shape): string[] {
+    return [shape.startId, shape.endId].filter((id): id is string => id !== undefined)
   }
 
   private singleSelection(): Shape | undefined {

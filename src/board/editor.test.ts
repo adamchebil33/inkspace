@@ -413,3 +413,124 @@ describe('view', () => {
     expect(store.list()).toEqual([])
   })
 })
+
+describe('arrows attached to shapes', () => {
+  // Two 100x100 rectangles, 200 apart, joined by an arrow drawn from one to
+  // the other.
+  function connected() {
+    const a = drawRect(0, 0, 100, 100)
+    const b = drawRect(300, 0, 400, 100)
+    editor.setTool('arrow')
+    drag(at(50, 50), at(350, 50))
+    const arrow = store.list().find((s) => s.type === 'arrow')!
+    return { a, b, arrow: arrow.id }
+  }
+  const arrowOf = (id: string) => store.get(id)!
+
+  it('attaches both ends when drawn from one shape to another', () => {
+    const { a, b, arrow } = connected()
+    expect(arrowOf(arrow)).toMatchObject({ startId: a, endId: b })
+    // Drawn edge to edge, not centre to centre.
+    expect(arrowOf(arrow)).toMatchObject({ x: 106, y: 50, w: 188, h: 0 })
+  })
+
+  it('follows a shape that is moved', () => {
+    const { b, arrow } = connected()
+    editor.setTool('select')
+    drag(at(350, 50), at(350, 350))
+    expect(store.get(b)).toMatchObject({ y: 300 })
+    const moved = arrowOf(arrow)
+    expect(moved.endId).toBe(b)
+    expect(moved.y + moved.h).toBeGreaterThan(250)
+  })
+
+  it('stays attached when moved together with its shapes', () => {
+    const { a, b, arrow } = connected()
+    editor.selectAll()
+    drag(at(50, 50), at(50, 250))
+    expect(arrowOf(arrow)).toMatchObject({ startId: a, endId: b, x: 106, y: 250 })
+  })
+
+  it('comes loose when dragged away on its own', () => {
+    const { arrow } = connected()
+    editor.setTool('select')
+    click(at(600, 600))
+    drag(at(200, 50), at(200, 150))
+    const loose = arrowOf(arrow)
+    expect(loose.startId).toBeUndefined()
+    expect(loose.endId).toBeUndefined()
+    expect(loose).toMatchObject({ x: 106, y: 150, w: 188 })
+  })
+
+  it('keeps its place, set free, when the shape it points at is deleted', () => {
+    const { a, b, arrow } = connected()
+    const before = arrowOf(arrow)
+    editor.setTool('select')
+    click(at(350, 50))
+    editor.deleteSelection()
+
+    expect(store.get(b)).toBeUndefined()
+    const after = arrowOf(arrow)
+    expect(after).toMatchObject({ x: before.x, y: before.y, w: before.w, h: before.h })
+    expect(after.startId).toBe(a)
+    expect(after.endId).toBeUndefined()
+
+    // Undo brings back both the shape and the attachment.
+    editor.undo()
+    expect(arrowOf(arrow).endId).toBe(b)
+  })
+
+  it('re-attaches an end dragged onto another shape, and frees one dropped on nothing', () => {
+    const { arrow } = connected()
+    const c = drawRect(300, 300, 400, 400)
+    editor.setTool('select')
+    click(at(200, 50))
+    // Grab the head (on the edge of b) and drop it on c.
+    const head = arrowOf(arrow)
+    drag(at(head.x + head.w, head.y), at(350, 350))
+    expect(arrowOf(arrow).endId).toBe(c)
+
+    const again = arrowOf(arrow)
+    drag(at(again.x + again.w, again.y + again.h), at(700, 700))
+    expect(arrowOf(arrow).endId).toBeUndefined()
+    expect(arrowOf(arrow)).toMatchObject({ w: 700 - arrowOf(arrow).x })
+  })
+
+  it('shows which shape an end will attach to while dragging', () => {
+    const a = drawRect(0, 0, 100, 100)
+    const b = drawRect(300, 0, 400, 100)
+    editor.setTool('arrow')
+    editor.pointerDown(at(50, 50))
+    editor.pointerMove(at(200, 50))
+    expect(editor.getRenderState().attachTargetId).toBeNull()
+    editor.pointerMove(at(350, 50))
+    expect(editor.getRenderState().attachTargetId).toBe(b)
+    // The tail's own shape is never offered as the target for the head.
+    editor.pointerMove(at(60, 60))
+    expect(editor.getRenderState().attachTargetId).toBeNull()
+    editor.pointerUp(at(60, 60))
+    expect(store.list().find((s) => s.type === 'arrow')).toMatchObject({ startId: a })
+  })
+
+  it('copies attachments only between shapes that are copied together', () => {
+    const { a, arrow } = connected()
+    editor.selectAll()
+    editor.duplicateSelection()
+    const copies = editor.getState().selection.map((id) => store.get(id)!)
+    const arrowCopy = copies.find((s) => s.type === 'arrow')!
+    const rectCopies = copies.filter((s) => s.type === 'rect').map((s) => s.id)
+    expect(rectCopies).toContain(arrowCopy.startId)
+    expect(rectCopies).toContain(arrowCopy.endId)
+    expect(arrowCopy.startId).not.toBe(a)
+
+    // Copying the arrow alone leaves the copy free.
+    editor.setTool('select')
+    click(at(900, 900))
+    click(at(200, 50))
+    expect(editor.getState().selection).toEqual([arrow])
+    editor.duplicateSelection()
+    const lone = store.get(editor.getState().selection[0]!)!
+    expect(lone.startId).toBeUndefined()
+    expect(lone.endId).toBeUndefined()
+  })
+})

@@ -1,8 +1,39 @@
 import * as Y from 'yjs'
+import { arrowEnds, arrowFromEnds, boundaryPoint, rectCenter } from './geometry'
 import { diffText } from './text'
 import { COLORS, SHAPE_TYPES, type ColorName, type Shape, type ShapeType } from './types'
 
-export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points'>>
+export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points' | 'startId' | 'endId'>> & {
+  /** `null` detaches that end of an arrow. */
+  startId?: string | null
+  endId?: string | null
+}
+
+/** Space left between an attached arrow end and the shape it touches. */
+const ARROW_GAP = 6
+
+/**
+ * Give an arrow its real geometry. An attached end sits on the outline of
+ * its shape, on the line toward the arrow's other end; a free end is where
+ * it was stored. Because this is computed on read, moving a shape moves its
+ * arrows on every client with no extra edits to send or to conflict.
+ */
+export function resolveArrow(arrow: Shape, byId: ReadonlyMap<string, Shape>): Shape {
+  const attached = (id: string | undefined) => {
+    const target = id ? byId.get(id) : undefined
+    return target && target.type !== 'arrow' ? target : undefined
+  }
+  const startTarget = attached(arrow.startId)
+  const endTarget = attached(arrow.endId)
+  if (!startTarget && !endTarget) return arrow
+
+  const stored = arrowEnds(arrow)
+  const startAim = startTarget ? rectCenter(startTarget) : stored.start
+  const endAim = endTarget ? rectCenter(endTarget) : stored.end
+  const start = startTarget ? boundaryPoint(startTarget, endAim, ARROW_GAP) : stored.start
+  const end = endTarget ? boundaryPoint(endTarget, startAim, ARROW_GAP) : stored.end
+  return { ...arrow, ...arrowFromEnds(start, end) }
+}
 
 const MAX_TEXT_LENGTH = 5000
 export const MAX_TITLE_LENGTH = 80
@@ -50,6 +81,10 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
   if (shape.type === 'arrow') {
     shape.flipX = map.get('flipX') === true
     shape.flipY = map.get('flipY') === true
+    const startId = map.get('startId')
+    const endId = map.get('endId')
+    if (typeof startId === 'string') shape.startId = startId
+    if (typeof endId === 'string') shape.endId = endId
   }
   return shape
 }
@@ -155,8 +190,10 @@ export class BoardStore {
         if (shape) shapes.push(shape)
       })
       shapes.sort((a, b) => a.z - b.z || (a.id < b.id ? -1 : 1))
-      this.sorted = shapes
-      this.byId = new Map(shapes.map((s) => [s.id, s]))
+      // Attached arrows take their position from the shapes they point at.
+      const stored = new Map(shapes.map((s) => [s.id, s]))
+      this.sorted = shapes.map((s) => (s.type === 'arrow' ? resolveArrow(s, stored) : s))
+      this.byId = new Map(this.sorted.map((s) => [s.id, s]))
     }
     return this.sorted
   }
@@ -196,6 +233,10 @@ export class BoardStore {
       if (!map) return
       for (const [key, value] of Object.entries(patch)) {
         if (value === undefined) continue
+        if (value === null) {
+          if (map.has(key)) map.delete(key)
+          continue
+        }
         if (key === 'text') this.editText(map, String(value).slice(0, MAX_TEXT_LENGTH))
         else if (map.get(key) !== value) map.set(key, value)
       }

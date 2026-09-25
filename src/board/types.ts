@@ -28,7 +28,8 @@ export type ColorName = (typeof COLORS)[number]
  * - pen:   `points`, a polyline relative to (x, y). The box can be resized;
  *          the stroke is then scaled to fit it.
  * - arrow: runs between two opposite corners of the box; `flipX`/`flipY` say
- *          which corner it starts from.
+ *          which corner it starts from. Either end can be attached to
+ *          another shape (`startId`/`endId`).
  * - text:  the box is exactly the text block, and the font scales with it.
  */
 export interface Shape {
@@ -47,6 +48,13 @@ export interface Shape {
   /** Arrow only: starts at the right (flipX) / bottom (flipY) edge. */
   flipX?: boolean
   flipY?: boolean
+  /**
+   * Arrow only: ids of the shapes its tail and head are attached to. An
+   * attached end is not stored as a position; it is worked out from where
+   * that shape is now, so the arrow follows the shape wherever it goes.
+   */
+  startId?: string
+  endId?: string
 }
 
 export type Tool = 'select' | 'hand' | ShapeType

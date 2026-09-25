@@ -16,6 +16,8 @@ offline merge when the connection returns, and undo only reverts your own change
   up for everyone immediately.
 - **Conflict-free.** Two people can move, recolour and type in the same note at once, or
   work offline. Both people's changes are kept and every copy of the board ends up identical.
+- **Arrows that stay attached.** Draw an arrow from one shape to another and it follows them
+  when either is moved, by anyone.
 - **A real canvas editor.** Pan and zoom, marquee select, move, resize, duplicate,
   reorder, keyboard shortcuts, touch pinch zoom, light and dark themes.
 - **Per-person undo.** Undo and redo step through your own edits and leave everyone
@@ -76,6 +78,14 @@ Each board is one Cloudflare Durable Object holding the document and its WebSock
 one WebSocket, reconnects with exponential backoff and jitter, and keeps the connection
 alive with a ping the server answers without waking the board. It replaced an off-the-shelf
 client that re-broadcast every presence update it received, multiplying traffic.
+
+### Arrows that follow shapes, with nothing extra to sync
+
+An arrow attached to a shape does not store where that end is. It stores the shape's id, and
+every client works out the end point from where the shape is now
+([`resolveArrow` in `src/board/store.ts`](src/board/store.ts)). So when someone moves a shape,
+only the shape's position is sent, and every arrow attached to it follows on every screen.
+There is no second edit that could arrive late or conflict with someone else's.
 
 ### The canvas editor
 
@@ -214,6 +224,5 @@ tests/e2e/        Playwright tests
 
 ## Known limitations
 
-- Arrows do not stay attached to the shapes they point at.
 - Anyone with an edit link can edit; links cannot be revoked.
 - The list of recent boards lives in the browser, not in an account.

@@ -25,6 +25,8 @@ export interface RenderState {
   draft: Draft | null
   /** Other people on the board: their cursors and what they have selected. */
   peers: readonly Peer[]
+  /** Shape an arrow end would attach to if released now. */
+  attachTargetId?: string | null
   /** Leave out the dot grid (image export). */
   hideGrid?: boolean
 }
@@ -80,6 +82,17 @@ export function render(
   if (state.draft) drawStroke(ctx, strokePath(state.draft.points), state.draft, theme)
 
   drawPeerSelections(ctx, state)
+
+  // While an arrow end is dragged over a shape, show what it will attach to.
+  const target = state.attachTargetId && state.shapes.find((s) => s.id === state.attachTargetId)
+  if (target) {
+    ctx.strokeStyle = theme.accent
+    ctx.lineWidth = 2.5 / zoom
+    const pad = 4 / zoom
+    ctx.beginPath()
+    ctx.roundRect(target.x - pad, target.y - pad, target.w + pad * 2, target.h + pad * 2, 6 / zoom)
+    ctx.stroke()
+  }
   drawSelection(ctx, state, theme)
 
   if (state.marquee) {

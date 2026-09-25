@@ -50,3 +50,41 @@ test('undo only reverts your own changes', async ({ browser }) => {
   await alice.getByRole('button', { name: 'Redo' }).click()
   await expect.poll(() => types(bob)).toEqual(['ellipse', 'rect'])
 })
+
+test('an arrow follows the shapes it connects when someone else moves them', async ({
+  browser,
+}) => {
+  const { edit: url } = await newBoard()
+  const alice = await openBoard(browser, url)
+  const bob = await openBoard(browser, url)
+
+  // Alice draws two rectangles and connects them with an arrow.
+  for (const x of [250, 650]) {
+    await alice.getByRole('button', { name: 'Rectangle' }).click()
+    await alice.mouse.click(x, 300)
+  }
+  await alice.getByRole('button', { name: 'Arrow' }).click()
+  await alice.mouse.move(250, 300)
+  await alice.mouse.down()
+  await alice.mouse.move(650, 300, { steps: 6 })
+  await alice.mouse.up()
+
+  const arrow = (page: Page) =>
+    page.evaluate(() => {
+      const found = window.editor!.store.list().find((s) => s.type === 'arrow')
+      return found && { y: found.y, h: found.h, attached: !!(found.startId && found.endId) }
+    })
+  await expect.poll(() => arrow(bob)).toMatchObject({ attached: true, h: 0 })
+
+  // Bob drags the right-hand rectangle down. He never touches the arrow.
+  await bob.mouse.move(650, 300)
+  await bob.mouse.down()
+  await bob.mouse.move(650, 500, { steps: 6 })
+  await bob.mouse.up()
+
+  // For both of them the arrow now slopes down to the moved rectangle.
+  for (const page of [alice, bob]) {
+    await expect.poll(async () => (await arrow(page))?.h).toBeGreaterThan(100)
+    expect(await arrow(page)).toMatchObject({ attached: true })
+  }
+})

@@ -4,6 +4,7 @@ import {
   MIN_ZOOM,
   arrowEnds,
   arrowFromEnds,
+  boundaryPoint,
   distanceToSegment,
   handlesFor,
   pointsSize,
@@ -211,5 +212,35 @@ describe('arrows', () => {
     expect(handlesFor('arrow')).toEqual([])
     expect(handlesFor('text')).toEqual(['nw', 'ne', 'se', 'sw'])
     expect(handlesFor('rect')).toHaveLength(8)
+  })
+})
+
+describe('boundaryPoint', () => {
+  const box = { type: 'rect', x: 0, y: 0, w: 100, h: 60 }
+
+  it('finds where a line from the centre leaves a rectangle', () => {
+    expect(boundaryPoint(box, { x: 500, y: 30 })).toEqual({ x: 100, y: 30 })
+    expect(boundaryPoint(box, { x: 50, y: -400 })).toEqual({ x: 50, y: 0 })
+    // Toward the far bottom-right, it exits through the bottom edge.
+    const corner = boundaryPoint(box, { x: 150, y: 230 })
+    expect(corner.y).toBeCloseTo(60)
+    expect(corner.x).toBeCloseTo(65)
+  })
+
+  it('follows the curve of an ellipse', () => {
+    const circle = { type: 'ellipse', x: 0, y: 0, w: 100, h: 100 }
+    const p = boundaryPoint(circle, { x: 150, y: 150 })
+    // On the circle of radius 50 around (50, 50), toward the diagonal.
+    expect(Math.hypot(p.x - 50, p.y - 50)).toBeCloseTo(50)
+    expect(p.x).toBeCloseTo(p.y)
+  })
+
+  it('leaves a gap outside the shape', () => {
+    expect(boundaryPoint(box, { x: 500, y: 30 }, 6)).toEqual({ x: 106, y: 30 })
+  })
+
+  it('does not overshoot a point that is inside the shape', () => {
+    expect(boundaryPoint(box, { x: 60, y: 30 }, 6)).toEqual({ x: 60, y: 30 })
+    expect(boundaryPoint(box, { x: 50, y: 30 })).toEqual({ x: 50, y: 30 })
   })
 })

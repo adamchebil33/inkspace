@@ -296,3 +296,35 @@ export function arrowEnds(arrow: ArrowBox): { start: Point; end: Point } {
 export function arrowFromEnds(start: Point, end: Point): Required<ArrowBox> {
   return { ...rectFromPoints(start, end), flipX: start.x > end.x, flipY: start.y > end.y }
 }
+
+/**
+ * Where a line from the middle of `shape` toward `toward` crosses the shape's
+ * outline, pushed out by `gap`. This is where an attached arrow end sits, so
+ * the arrow touches the edge of the shape instead of running to its centre.
+ */
+export function boundaryPoint(shape: Rect & { type: string }, toward: Point, gap = 0): Point {
+  const cx = shape.x + shape.w / 2
+  const cy = shape.y + shape.h / 2
+  const dx = toward.x - cx
+  const dy = toward.y - cy
+  const distance = Math.hypot(dx, dy)
+  if (distance === 0) return { x: cx, y: cy }
+
+  const rx = shape.w / 2
+  const ry = shape.h / 2
+  // Fraction of the way to `toward` at which the line meets the outline.
+  let fraction: number
+  if (shape.type === 'ellipse') {
+    fraction = rx === 0 || ry === 0 ? 0 : 1 / Math.hypot(dx / rx, dy / ry)
+  } else {
+    fraction = Math.min(
+      dx === 0 ? Infinity : rx / Math.abs(dx),
+      dy === 0 ? Infinity : ry / Math.abs(dy),
+    )
+  }
+  // If `toward` is inside the shape, stop there rather than overshoot it.
+  const reach = Math.min(fraction * distance + gap, distance)
+  return { x: cx + (dx / distance) * reach, y: cy + (dy / distance) * reach }
+}
+
+export const rectCenter = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
