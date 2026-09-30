@@ -60,36 +60,118 @@ test('creating a board from the home page and finding it again', async ({ browse
   const context = await browser.newContext()
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const page = await context.newPage()
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText())
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1 })).toContainText('whiteboard')
   await expect(page.getByRole('heading', { name: 'Your recent boards' })).toHaveCount(0)
 
+  // The creator's address carries no secret, so it is safe to pass around.
   await page.getByRole('button', { name: 'New board' }).click()
-  await expect(page).toHaveURL(/\/b\/[\w-]+#[\w-]+$/)
+  await expect(page).toHaveURL(/\/b\/[\w-]+$/)
   await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
-  const editUrl = page.url()
+  const viewUrl = page.url()
 
   await page.getByRole('textbox', { name: 'Board title' }).fill('Sprint planning')
   await expect(page).toHaveTitle('Sprint planning · Inkspace')
 
-  // The share menu hands out both kinds of link.
+  // The share menu hands out each kind of link.
   await page.getByRole('button', { name: 'Share' }).click()
   await page.getByRole('button', { name: /Copy view-only link/ }).click()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(editUrl.split('#')[0])
+  expect(await clipboard()).toBe(viewUrl)
   await page.getByRole('button', { name: /Copy edit link/ }).click()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(editUrl)
-
-  // Back on the home page the board is listed, and opens with edit access.
+  const editUrl = await clipboard()
+  expect(editUrl).toMatch(new RegExp(`^${viewUrl}#[\\w-]+$`))
+  await page.getByRole('button', { name: /Copy owner link/ }).click()
+  const ownerUrl = await clipboard()
+  expect(ownerUrl).toMatch(new RegExp(`^${viewUrl}#[\\w-]+$`))
+  expect(ownerUrl).not.toBe(editUrl)
   await page.keyboard.press('Escape')
+
+  // Someone given the edit link can edit, but cannot reset links.
+  const guest = await openBoard(browser, editUrl)
+  await expect(guest.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+  await guest.getByRole('button', { name: 'Share' }).click()
+  await expect(guest.getByRole('button', { name: /Copy edit link/ })).toBeVisible()
+  await expect(guest.getByRole('button', { name: /Reset edit link/ })).toHaveCount(0)
+
+  // Back on the home page the board is listed, and opens with full access.
   await page.getByRole('link', { name: 'All boards' }).click()
   await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('link', { name: /Sprint planning/ })).toContainText('Owner')
   await page.getByRole('link', { name: /Sprint planning/ }).click()
-  await expect(page).toHaveURL(editUrl)
+  await expect(page).toHaveURL(viewUrl)
   await expect(page.getByRole('textbox', { name: 'Board title' })).toHaveValue('Sprint planning')
-
-  // The creator keeps edit access even through the view-only link.
-  await page.goto(editUrl.split('#')[0]!)
   await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+
+  // The owner stays the owner even when opening their board by an edit link.
+  await page.goto(editUrl)
+  await page.getByRole('button', { name: 'Share' }).click()
+  await expect(page.getByRole('button', { name: /Reset edit link/ })).toBeVisible()
+})
+
+test('an owner link opened on another device gives full control and hides the key', async ({
+  browser,
+}) => {
+  const board = await newBoard()
+  const page = await openBoard(browser, board.owner)
+  await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+  // Once saved in this browser, the owner key leaves the address bar.
+  await expect(page).toHaveURL(new RegExp(`${board.view}$`))
+  await page.reload()
+  await page.getByRole('button', { name: 'Share' }).click()
+  await expect(page.getByRole('button', { name: /Reset edit link/ })).toBeVisible()
+})
+
+test('resetting the edit link cuts off everyone using the old one', async ({ browser }) => {
+  const board = await newBoard()
+  const ownerContext = await browser.newContext()
+  await ownerContext.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const owner = await ownerContext.newPage()
+  await owner.goto(board.owner)
+  await expect(owner.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+
+  const guest = await openBoard(browser, board.edit)
+  await addSticky(guest, 400, 300, 'From the guest')
+  await expect.poll(() => shapes(owner)).toHaveLength(1)
+
+  // The owner resets the link (two clicks: ask, then confirm).
+  await owner.getByRole('button', { name: 'Share' }).click()
+  await owner.getByRole('button', { name: /Reset edit link/ }).click()
+  await owner.getByRole('button', { name: /Click again to confirm/ }).click()
+  await expect(owner.getByText('Old edit links are now view-only')).toBeVisible()
+
+  // The guest, still connected, becomes view-only on the spot.
+  await expect(guest.getByText('View only')).toBeVisible()
+  await expect(guest.getByRole('toolbar', { name: 'Tools' })).toHaveCount(0)
+  // They keep seeing the board, including what they added, and new edits.
+  await owner.keyboard.press('Escape')
+  await addSticky(owner, 700, 300, 'From the owner')
+  await expect.poll(() => shapes(guest)).toHaveLength(2)
+
+  // Even a modified client holding the old link cannot write any more.
+  await guest.evaluate(() => {
+    const doc = window.editor!.store.doc
+    const shape = doc.getMap('shapes').values().next().value as { set(k: string, v: unknown): void }
+    doc.transact(() => shape.set('color', 'red'))
+  })
+  await addSticky(owner, 700, 550, 'Third')
+  await expect.poll(() => shapes(guest)).toHaveLength(3)
+  const colors = await owner.evaluate(() => window.editor!.store.list().map((s) => s.color))
+  expect(colors).not.toContain('red')
+
+  // Opened fresh, the old link is view-only too.
+  const late = await openBoard(browser, board.edit)
+  await expect(late.getByText('View only')).toBeVisible()
+
+  // The owner hands out the new link, and that one works.
+  await owner.getByRole('button', { name: 'Share' }).click()
+  await owner.getByRole('button', { name: /Copy edit link/ }).click()
+  const newEditUrl = await owner.evaluate(() => navigator.clipboard.readText())
+  expect(newEditUrl.endsWith(board.edit.split('#')[1]!)).toBe(false)
+  const invited = await openBoard(browser, newEditUrl)
+  await expect(invited.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+  await addSticky(invited, 400, 550, 'With the new link')
+  await expect.poll(() => shapes(owner)).toHaveLength(4)
 })
 
 test('the home page shows your name, ready to keep or change', async ({ browser }) => {

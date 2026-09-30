@@ -175,3 +175,18 @@ export const HelpIcon = () => (
     <path d="M12 17h.01" />
   </Icon>
 )
+
+export const KeyIcon = () => (
+  <Icon>
+    <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" />
+    <path d="m21 2-9.6 9.6" />
+    <circle cx="7.5" cy="15.5" r="5.5" />
+  </Icon>
+)
+
+export const ResetIcon = () => (
+  <Icon>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+  </Icon>
+)

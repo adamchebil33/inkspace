@@ -292,6 +292,18 @@ export class Editor {
 
   // ---- Tools, colour, selection ----
 
+  /** Switch between editing and view-only, as the server grants or withdraws access. */
+  setReadOnly(readOnly: boolean): void {
+    if (this.store.readOnly === readOnly) return
+    this.endEditing()
+    this.store.readOnly = readOnly
+    this.interaction = { kind: 'idle' }
+    this.selection = []
+    // Viewers can only pan; editors start with the select tool.
+    this.tool = readOnly ? 'hand' : 'select'
+    this.emit()
+  }
+
   setTool(tool: Tool): void {
     if (this.store.readOnly) return
     this.endEditing()

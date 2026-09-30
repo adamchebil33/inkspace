@@ -534,3 +534,29 @@ describe('arrows attached to shapes', () => {
     expect(lone.endId).toBeUndefined()
   })
 })
+
+describe('access changes', () => {
+  it('becomes view-only when edit access is withdrawn, and editable when granted', () => {
+    const id = drawRect(0, 0, 100, 100)
+    editor.startEditing(id)
+
+    editor.setReadOnly(true)
+    expect(editor.getState()).toMatchObject({
+      readOnly: true,
+      tool: 'hand',
+      selection: [],
+      editingId: null,
+    })
+    // Nothing can be changed any more.
+    editor.setTool('rect')
+    drag(at(200, 200), at(300, 300))
+    editor.selectAll()
+    editor.deleteSelection()
+    expect(store.list()).toHaveLength(1)
+
+    editor.setReadOnly(false)
+    expect(editor.getState()).toMatchObject({ readOnly: false, tool: 'select' })
+    drawRect(200, 200, 300, 300)
+    expect(store.list()).toHaveLength(2)
+  })
+})

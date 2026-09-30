@@ -8,6 +8,7 @@ import {
 } from 'y-protocols/awareness'
 import * as syncProtocol from 'y-protocols/sync'
 import type * as Y from 'yjs'
+import type { Role } from '../../shared/boardKey'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 
@@ -15,6 +16,17 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 const MESSAGE_SYNC = 0
 const MESSAGE_AWARENESS = 1
 const MESSAGE_QUERY_AWARENESS = 3
+const MESSAGE_ACCESS = 4
+const MESSAGE_RESET_EDIT_LINK = 5
+
+const ROLES: readonly Role[] = ['viewer', 'editor', 'owner']
+
+/** What the server says this connection may do. */
+export interface Access {
+  role: Role
+  /** How many times the board's edit link has been reset. */
+  generation: number
+}
 
 const PING_INTERVAL_MS = 20_000
 /** No message of any kind for this long means the connection is dead. */
@@ -51,6 +63,7 @@ export class SyncClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private readonly listeners = new Set<() => void>()
   private synced = false
+  private access: Access | null = null
   private readonly syncedCallbacks: (() => void)[] = []
 
   constructor(url: string, doc: Y.Doc, options: SyncClientOptions = {}) {
@@ -99,6 +112,24 @@ export class SyncClient {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * What the server allows, or null until it has said. Kept across
+   * disconnections, so someone who could edit can keep editing offline.
+   */
+  getAccess = (): Access | null => this.access
+
+  /**
+   * Owner only: make `hash` the hash of the one valid edit token. Everyone
+   * editing with the previous link becomes view-only.
+   */
+  resetEditLink(generation: number, hash: string): void {
+    const encoder = encoding.createEncoder()
+    encoding.writeVarUint(encoder, MESSAGE_RESET_EDIT_LINK)
+    encoding.writeVarUint(encoder, generation)
+    encoding.writeVarString(encoder, hash)
+    this.send(encoding.toUint8Array(encoder))
   }
 
   /** Run `callback` once the board's content has first arrived from the server. */
@@ -223,6 +254,13 @@ export class SyncClient {
     } else if (type === MESSAGE_QUERY_AWARENESS) {
       // Someone joined and needs to know we are here.
       this.sendOwnAwareness()
+    } else if (type === MESSAGE_ACCESS) {
+      const role = ROLES[decoding.readVarUint(decoder)] ?? 'viewer'
+      const generation = decoding.readVarUint(decoder)
+      if (role !== this.access?.role || generation !== this.access.generation) {
+        this.access = { role, generation }
+        for (const listener of this.listeners) listener()
+      }
     }
   }
 

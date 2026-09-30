@@ -1,51 +1,35 @@
-import { useEffect, useState } from 'react'
-import { canEditBoard } from '../../shared/boardKey'
+import { useState } from 'react'
 import { Board } from '../components/Board'
-import { savedEditKey } from '../lib/recentBoards'
+import { savedBoard } from '../lib/recentBoards'
 
 interface Props {
   boardId: string
-  /** Edit key from the link's fragment, if it had one. */
-  editKey: string | null
-}
-
-interface Access {
-  boardId: string
-  editKey: string | null
+  /** Owner key or edit token from the link's fragment, if it had one. */
+  linkKey: string | null
 }
 
 /**
- * Work out whether this browser may edit the board: either the link carried
- * a valid key, or we saved one earlier (for example, we created the board
- * and came back through a view-only link).
+ * Which key to present for this board. A saved owner key always wins: if the
+ * owner opens their own board through an edit or view link, they are still
+ * the owner. Otherwise use the link's key, or one saved from an earlier visit.
  */
-async function resolveAccess(boardId: string, linkKey: string | null): Promise<Access> {
-  for (const key of [linkKey, savedEditKey(boardId)]) {
-    if (await canEditBoard(boardId, key)) return { boardId, editKey: key }
-  }
-  return { boardId, editKey: null }
+function chooseKey(boardId: string, linkKey: string | null): string | null {
+  const saved = savedBoard(boardId)
+  if (saved?.role === 'owner') return saved.key
+  return linkKey ?? saved?.key ?? null
 }
 
-export function BoardPage({ boardId, editKey }: Props) {
-  const [access, setAccess] = useState<Access | null>(null)
+export function BoardPage({ boardId, linkKey }: Props) {
+  // Bumped to throw away the session and start a fresh one, when this
+  // browser's edit access is withdrawn (see Board).
+  const [epoch, setEpoch] = useState(0)
 
-  useEffect(() => {
-    let cancelled = false
-    void resolveAccess(boardId, editKey).then((resolved) => {
-      if (!cancelled) setAccess(resolved)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [boardId, editKey])
-
-  // Checking the key takes a millisecond or two; render nothing meanwhile.
-  if (access?.boardId !== boardId) return null
   return (
     <Board
-      key={`${boardId}:${access.editKey ? 'edit' : 'view'}`}
+      key={`${boardId}:${epoch}`}
       boardId={boardId}
-      editKey={access.editKey}
+      accessKey={chooseKey(boardId, linkKey)}
+      onAccessLost={() => setEpoch((n) => n + 1)}
     />
   )
 }

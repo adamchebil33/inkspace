@@ -3,21 +3,21 @@ import { BOARD_ID_PATTERN } from '../../shared/boardKey'
 
 export type Route =
   | { page: 'home' }
-  /** `editKey` comes from the URL fragment, which is never sent to a server. */
-  | { page: 'board'; boardId: string; editKey: string | null }
+  /** `key` (owner key or edit token) is the URL fragment, which is never sent to a server. */
+  | { page: 'board'; boardId: string; key: string | null }
   | { page: 'not-found' }
 
 export function parseRoute(pathname: string, hash: string): Route {
   if (pathname === '/') return { page: 'home' }
   const match = /^\/b\/([^/]+)\/?$/.exec(pathname)
   if (match && BOARD_ID_PATTERN.test(match[1]!)) {
-    return { page: 'board', boardId: match[1]!, editKey: hash.replace(/^#/, '') || null }
+    return { page: 'board', boardId: match[1]!, key: hash.replace(/^#/, '') || null }
   }
   return { page: 'not-found' }
 }
 
-export const boardPath = (boardId: string, editKey?: string | null) =>
-  `/b/${boardId}${editKey ? `#${editKey}` : ''}`
+export const boardPath = (boardId: string, key?: string | null) =>
+  `/b/${boardId}${key ? `#${key}` : ''}`
 
 const NAVIGATE_EVENT = 'inkspace:navigate'
 

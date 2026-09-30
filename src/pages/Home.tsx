@@ -1,18 +1,26 @@
 import { useState } from 'react'
-import { boardIdForKey, newEditKey } from '../../shared/boardKey'
+import { boardIdForOwner, newOwnerKey } from '../../shared/boardKey'
 import { Logo } from '../components/icons'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { MAX_NAME_LENGTH, cleanName, initials, loadUser, saveUser } from '../lib/identity'
-import { forgetBoard, loadRecentBoards, timeAgo } from '../lib/recentBoards'
+import { forgetBoard, loadRecentBoards, rememberBoard, timeAgo } from '../lib/recentBoards'
 import { boardPath, navigate } from '../lib/router'
 
 const REPO_URL = 'https://github.com/adamchebil33/inkspace'
 
-/** Boards need no server call to exist: pick a key, derive the id, go there. */
+/**
+ * Boards need no server call to exist: pick an owner key, derive the id, go
+ * there. The key is saved in this browser, which makes this browser the
+ * board's owner. It only goes into the address if it could not be saved.
+ */
 async function createBoard(): Promise<void> {
-  const editKey = newEditKey()
-  navigate(boardPath(await boardIdForKey(editKey), editKey))
+  const ownerKey = newOwnerKey()
+  const id = await boardIdForOwner(ownerKey)
+  const saved = rememberBoard({ id, key: ownerKey, role: 'owner', title: '' })
+  navigate(boardPath(id, saved ? null : ownerKey))
 }
+
+const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'View only' } as const
 
 export function Home() {
   const [boards, setBoards] = useState(loadRecentBoards)
@@ -78,16 +86,16 @@ export function Home() {
               {boards.map((board) => (
                 <li key={board.id}>
                   <a
-                    href={boardPath(board.id, board.editKey)}
+                    href={boardPath(board.id)}
                     className="board-card"
                     onClick={(e) => {
                       e.preventDefault()
-                      navigate(boardPath(board.id, board.editKey))
+                      navigate(boardPath(board.id))
                     }}
                   >
                     <strong>{board.title || 'Untitled board'}</strong>
                     <small>
-                      {board.editKey ? 'Can edit' : 'View only'} · opened {timeAgo(board.openedAt)}
+                      {ROLE_LABEL[board.role]} · opened {timeAgo(board.openedAt)}
                     </small>
                   </a>
                   <button

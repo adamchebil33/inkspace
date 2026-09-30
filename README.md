@@ -23,7 +23,8 @@ offline merge when the connection returns, and undo only reverts your own change
 - **Per-person undo.** Undo and redo step through your own edits and leave everyone
   else's alone.
 - **Share links without accounts.** One link lets people edit, another lets them only
-  watch. The server enforces the difference.
+  watch, and the server enforces the difference. The board's creator can reset the edit link
+  at any time, which cuts off everyone using the old one. Still no sign-up.
 - **Saved automatically.** Boards are still there days later.
 - **AI summary (optional).** One button turns the notes into a summary, themes and action
   items, and can drop the action items onto the board as new sticky notes.
@@ -101,18 +102,26 @@ Pen strokes are streamed to other people while they are being drawn, over the sa
 short-lived presence channel as cursors, then simplified and saved to the document once
 on release.
 
-### Share links without accounts or a database
+### Share links, and revoking them, without accounts
 
-Creating a board generates a random edit key in the browser. The board id is a SHA-256
-hash of that key ([`shared/boardKey.ts`](shared/boardKey.ts)).
+Creating a board generates a random owner key that stays in the creator's browser. Everything
+else is derived from it with one-way hashes ([`shared/boardKey.ts`](shared/boardKey.ts)):
 
-| Link                 | Lets you         |
-| -------------------- | ---------------- |
-| `/b/<id>#<edit key>` | edit             |
-| `/b/<id>`            | watch, read-only |
+```
+owner key  --hash-->  edit token  --hash-->  board id
+```
 
-The server recomputes the hash to decide whether a connection may write, so it never
-stores who can edit what, and a view link cannot be turned into an edit link.
+| Link                   | Lets you                      |
+| ---------------------- | ----------------------------- |
+| `/b/<id>#<owner key>`  | edit, and reset the edit link |
+| `/b/<id>#<edit token>` | edit                          |
+| `/b/<id>`              | watch, read-only              |
+
+The server checks a key by hashing it, so a new board needs nothing stored about who may do
+what, and no link can be upgraded to a stronger one. To revoke edit access, the owner derives
+the next edit token from their key and tells the server its hash. Old edit links stop working
+at once, including for people connected at that moment, and the owner can always produce the
+current link again from their key alone.
 
 ### AI as a small, optional extra
 
@@ -169,8 +178,8 @@ The first time, install the test browser with `npx playwright install chromium`.
 
 The browser tests open the same board in separate browser contexts and check, among other
 things, that a change in one window shows up in the other, that offline edits merge after
-reconnecting, that undo only reverts your own changes, and that the server refuses writes
-from a view-only link.
+reconnecting, that undo only reverts your own changes, that the server refuses writes from
+a view-only link, and that resetting the edit link cuts off people using the old one.
 
 ## Deploy
 
@@ -224,5 +233,5 @@ tests/e2e/        Playwright tests
 
 ## Known limitations
 
-- Anyone with an edit link can edit; links cannot be revoked.
+- The owner link cannot be revoked, so whoever has it controls the board. Keep it private.
 - The list of recent boards lives in the browser, not in an account.

@@ -149,6 +149,47 @@ describe('SyncClient', () => {
     expect(synced).toBe(2)
   })
 
+  it('learns from the server what it may do, and remembers it while offline', () => {
+    const { client } = makeClient()
+    let changes = 0
+    client.subscribe(() => changes++)
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    expect(client.getAccess()).toBeNull()
+
+    // [access][role: 1 = editor][generation 0]
+    socket.receive(new Uint8Array([4, 1, 0]))
+    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0 })
+    const afterFirst = changes
+    socket.receive(new Uint8Array([4, 1, 0]))
+    expect(changes).toBe(afterFirst)
+
+    socket.close()
+    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0 })
+
+    // After a reset the server downgrades this connection.
+    vi.advanceTimersByTime(1000)
+    lastSocket().open()
+    lastSocket().receive(new Uint8Array([4, 0, 1]))
+    expect(client.getAccess()).toEqual({ role: 'viewer', generation: 1 })
+  })
+
+  it('asks the server to reset the edit link', () => {
+    const { client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    socket.sent = []
+
+    client.resetEditLink(3, 'abc')
+    const message = socket.sent[0] as Uint8Array
+    const decoder = decoding.createDecoder(message)
+    expect(decoding.readVarUint(decoder)).toBe(5)
+    expect(decoding.readVarUint(decoder)).toBe(3)
+    expect(decoding.readVarString(decoder)).toBe('abc')
+  })
+
   it('sends only its own presence, also when asked', () => {
     const { client } = makeClient()
     client.connect()

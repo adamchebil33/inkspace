@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { downloadCanvas, exportFilename, renderBoardImage } from '../board/export'
 import { createBoardSession } from '../board/session'
 import { DARK_THEME, LIGHT_THEME } from '../board/theme'
@@ -18,14 +18,19 @@ import { ZoomControls } from './ZoomControls'
 
 interface Props {
   boardId: string
-  /** Null opens the board view-only. */
-  editKey: string | null
+  /** Owner key or edit token to present to the server, if this browser has one. */
+  accessKey: string | null
+  /** This browser could edit, and the server has just withdrawn that. */
+  onAccessLost: () => void
 }
 
 /** One board. Render with a `key` so a different board gets a fresh session. */
-export function Board({ boardId, editKey }: Props) {
-  const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId, editKey))
+export function Board({ boardId, accessKey, onAccessLost }: Props) {
+  const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId, accessKey))
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
+  // What the server lets this connection do; null until it has answered.
+  const access = useSyncExternalStore(sync.subscribe, sync.getAccess)
+  const role = access?.role
   useShortcuts(editor)
   const [summaryOpen, setSummaryOpen] = useState(false)
 
@@ -37,12 +42,38 @@ export function Board({ boardId, editKey }: Props) {
   // Keep the home page's list of boards and the tab title up to date.
   const title = editor.store.getTitle()
   useEffect(() => {
-    rememberBoard({ id: boardId, editKey, title })
     document.title = title ? `${title} · Inkspace` : 'Inkspace'
     return () => {
       document.title = 'Inkspace'
     }
-  }, [boardId, editKey, title])
+  }, [title])
+
+  useEffect(() => {
+    if (!role) return
+    // A key that turned out to grant nothing (a revoked edit link) is dropped.
+    const saved = rememberBoard({
+      id: boardId,
+      key: role === 'viewer' ? null : accessKey,
+      role,
+      title,
+    })
+    // Keep secrets out of the address bar where that is safe: the owner key
+    // once it is saved here (so the address can be shared without handing
+    // over the board), and a key that no longer works.
+    if (location.hash && ((role === 'owner' && saved) || role === 'viewer')) {
+      history.replaceState(null, '', location.pathname)
+    }
+  }, [boardId, accessKey, role, title])
+
+  // If the edit link is reset while this person is editing with it, their
+  // copy may hold edits the server will now refuse. Start again from the
+  // server's version, view-only.
+  const couldEdit = useRef(false)
+  useEffect(() => {
+    if (!role) return
+    if (couldEdit.current && role === 'viewer') onAccessLost()
+    couldEdit.current = role !== 'viewer'
+  }, [role, onAccessLost])
 
   // Exposed in development for console debugging and the end-to-end tests.
   useEffect(() => {
@@ -56,7 +87,7 @@ export function Board({ boardId, editKey }: Props) {
       <BoardHeader editor={editor} state={state} />
       <ConnectionStatus sync={sync} />
       <div className="panel board-actions">
-        {state.readOnly && <span className="badge">View only</span>}
+        {role === 'viewer' && <span className="badge">View only</span>}
         <PresenceBar editor={editor} presence={presence} />
         <button
           type="button"
@@ -70,7 +101,9 @@ export function Board({ boardId, editKey }: Props) {
         </button>
         <ShareMenu
           boardId={boardId}
-          editKey={editKey}
+          accessKey={accessKey}
+          access={access}
+          onResetEditLink={(generation, hash) => sync.resetEditLink(generation, hash)}
           onExport={() => {
             const theme = getTheme() === 'dark' ? DARK_THEME : LIGHT_THEME
             const image = renderBoardImage(editor.store.list(), theme)

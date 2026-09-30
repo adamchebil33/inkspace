@@ -6,7 +6,7 @@ export function App() {
   const route = useRoute()
 
   if (route.page === 'home') return <Home />
-  if (route.page === 'board') return <BoardPage boardId={route.boardId} editKey={route.editKey} />
+  if (route.page === 'board') return <BoardPage boardId={route.boardId} linkKey={route.key} />
   return (
     <div className="home">
       <main className="home-main">

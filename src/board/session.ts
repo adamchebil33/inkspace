@@ -17,17 +17,25 @@ export interface BoardSession {
 
 /**
  * Create the document, editor and (not yet connected) sync client for a
- * board. Without an edit key the board is view-only. Call `sync.connect()`
- * to go live.
+ * board. `key` is the owner key or edit token from the link, if any. Call
+ * `sync.connect()` to go live.
  */
-export function createBoardSession(boardId: string, editKey: string | null): BoardSession {
+export function createBoardSession(boardId: string, key: string | null): BoardSession {
   const doc = new Y.Doc()
-  const editor = new Editor(new BoardStore(doc, { readOnly: !editKey }), { measureText })
+  // View-only until the server says otherwise. Whether a key still grants
+  // edit access is the server's call (an edit link can be revoked), so the
+  // client never decides that for itself.
+  const editor = new Editor(new BoardStore(doc, { readOnly: true }), { measureText })
 
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-  // The edit key proves to the server that this connection may write.
-  const query = editKey ? `?key=${encodeURIComponent(editKey)}` : ''
+  // The key (an owner key or an edit token) proves what this connection may do.
+  const query = key ? `?key=${encodeURIComponent(key)}` : ''
   const sync = new SyncClient(`${scheme}://${location.host}/api/ws/${boardId}${query}`, doc)
+
+  sync.subscribe(() => {
+    const access = sync.getAccess()
+    if (access) editor.setReadOnly(access.role === 'viewer')
+  })
 
   // Share our cursor, selection and any pen stroke in progress. Presence drops repeats and throttles the
   // cursor, so it is fine to call this on every editor change (including

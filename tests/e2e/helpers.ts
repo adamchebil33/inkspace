@@ -1,18 +1,24 @@
 import { expect, type Browser, type Page } from '@playwright/test'
-import { boardIdForKey, newEditKey } from '../../shared/boardKey'
+import { boardIdForOwner, editTokenFor, newOwnerKey } from '../../shared/boardKey'
 
 export interface BoardLinks {
-  /** Link that allows editing (carries the key in its fragment). */
+  /** Link that allows editing and resetting the edit link. */
+  owner: string
+  /** Link that allows editing. */
   edit: string
-  /** Link to the same board without the key. */
+  /** Link to the same board without any key. */
   view: string
 }
 
 /** A fresh board per test, so tests never see each other's shapes. */
 export async function newBoard(): Promise<BoardLinks> {
-  const key = newEditKey()
-  const id = await boardIdForKey(key)
-  return { edit: `/b/${id}#${key}`, view: `/b/${id}` }
+  const ownerKey = newOwnerKey()
+  const id = await boardIdForOwner(ownerKey)
+  return {
+    owner: `/b/${id}#${ownerKey}`,
+    edit: `/b/${id}#${await editTokenFor(ownerKey, 0)}`,
+    view: `/b/${id}`,
+  }
 }
 
 const randomAddress = () =>
@@ -29,7 +35,9 @@ export async function openBoard(browser: Browser, url: string): Promise<Page> {
   const page = await context.newPage()
   await page.goto(url)
   await expect(page.getByRole('textbox', { name: 'Board title' })).toBeVisible()
+  // Connected, and the server has said what this visitor may do.
   await expect(page.getByRole('status')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.sync?.getAccess()?.role)).toBeTruthy()
   return page
 }
 

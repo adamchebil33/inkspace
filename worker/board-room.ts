@@ -3,7 +3,13 @@ import * as decoding from 'lib0/decoding'
 import * as encoding from 'lib0/encoding'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
-import { canEditBoard } from '../shared/boardKey'
+import {
+  BOARD_ID_PATTERN,
+  initialEditAccess,
+  resolveRole,
+  type EditAccess,
+  type Role,
+} from '../shared/boardKey'
 import type { BoardSummary, SummaryError, SummaryResponse } from '../shared/summary'
 import { summarizeNotes } from './ai'
 import { encodeAwarenessRemoval, readAwarenessUpdate, type AwarenessEntry } from './awareness'
@@ -13,6 +19,12 @@ import { collectNotes } from './notes'
 const MESSAGE_SYNC = 0
 const MESSAGE_AWARENESS = 1
 const MESSAGE_QUERY_AWARENESS = 3
+/** Server to client: what this connection may do (role, edit link generation). */
+const MESSAGE_ACCESS = 4
+/** Owner to server: replace the edit link (new generation, hash of its token). */
+const MESSAGE_RESET_EDIT_LINK = 5
+
+const ROLE_CODE: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 }
 
 // Sync sub-message types (y-protocols/sync).
 const SYNC_STEP_1 = 0
@@ -42,7 +54,9 @@ const summaryResponse = (body: SummaryResponse, status = 200) => Response.json(b
 
 /** Per-socket data. Stored on the socket itself so it survives hibernation. */
 interface Attachment {
-  canEdit: boolean
+  role: Role
+  /** Which board this is; a woken object has no other way to know. */
+  boardId: string
   /** Presence client ids announced by this socket, with their latest clock. */
   clocks: Record<string, number>
 }
@@ -64,12 +78,14 @@ export class BoardRoom extends DurableObject<Env> {
   private updateRows = 0
   private lastSummary: { fingerprint: string; summary: BoardSummary } | null = null
   private lastSummaryAt = 0
+  private editAccess: EditAccess | null = null
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS updates (id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
     `)
     // Keep-alive pings are answered here without waking the object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -87,15 +103,18 @@ export class BoardRoom extends DurableObject<Env> {
       return new Response('This board is full', { status: 429 })
     }
 
-    // /api/ws/<boardId>?key=<editKey>: the key must hash to the board id.
-    // Without it the connection can read and show a cursor, but not write.
+    // /api/ws/<boardId>?key=<owner key or edit token>. Without a valid key
+    // the connection can read and show a cursor, but not write.
     const url = new URL(request.url)
     const boardId = url.pathname.split('/').pop() ?? ''
-    const canEdit = await canEditBoard(boardId, url.searchParams.get('key'))
+    const access = this.getEditAccess(boardId)
+    const role = await resolveRole(boardId, url.searchParams.get('key'), access)
 
     const { 0: client, 1: server } = new WebSocketPair()
     this.ctx.acceptWebSocket(server)
-    this.setAttachment(server, { canEdit, clocks: {} })
+    this.setAttachment(server, { role, boardId, clocks: {} })
+    // First thing the client learns is what it is allowed to do.
+    server.send(accessMessage(role, access.generation))
 
     // Ask the newcomer what it has that we don't (it asks us the same).
     const encoder = encoding.createEncoder()
@@ -118,6 +137,7 @@ export class BoardRoom extends DurableObject<Env> {
       const type = decoding.readVarUint(decoder)
       if (type === MESSAGE_SYNC) this.handleSync(ws, decoder)
       else if (type === MESSAGE_AWARENESS) this.handleAwareness(ws, decoder, data)
+      else if (type === MESSAGE_RESET_EDIT_LINK) await this.handleResetEditLink(ws, decoder)
     } catch (error) {
       // A malformed message must not take the room down for everyone else.
       console.warn('Dropped a bad message', error)
@@ -149,10 +169,56 @@ export class BoardRoom extends DurableObject<Env> {
       encoding.writeVarUint8Array(encoder, encodeAwarenessRemoval(clocks))
       this.send(others, encoding.toUint8Array(encoder))
     }
-    this.setAttachment(ws, { canEdit: false, clocks: {} })
+    this.setAttachment(ws, { ...this.getAttachment(ws), role: 'viewer', clocks: {} })
 
     // Last one out: save now rather than waiting for the timer.
     if (others.length === 0) this.flush()
+  }
+
+  // ---- Access ----
+
+  /**
+   * Which edit token is valid. Nothing is stored until the owner first resets
+   * the link: before that, the valid token is the one that hashes to the id.
+   */
+  private getEditAccess(boardId: string): EditAccess {
+    if (this.editAccess) return this.editAccess
+    const rows = this.ctx.storage.sql
+      .exec<{ value: string }>("SELECT value FROM settings WHERE name = 'editAccess'")
+      .toArray()
+    const saved = rows[0] ? (JSON.parse(rows[0].value) as EditAccess) : null
+    this.editAccess = saved ?? initialEditAccess(boardId)
+    return this.editAccess
+  }
+
+  /**
+   * The owner replaces the edit link. Every connection that was editing with
+   * the old link becomes view-only on the spot, and the old link stops
+   * working for anyone who opens it later.
+   */
+  private async handleResetEditLink(ws: WebSocket, decoder: decoding.Decoder): Promise<void> {
+    const { role, boardId } = this.getAttachment(ws)
+    if (role !== 'owner') return
+    const generation = decoding.readVarUint(decoder)
+    const hash = decoding.readVarString(decoder)
+    // Generations only go forward, so a delayed or repeated request is harmless.
+    const current = this.getEditAccess(boardId)
+    if (generation <= current.generation || !BOARD_ID_PATTERN.test(hash)) return
+
+    this.editAccess = { generation, hash }
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO settings (name, value) VALUES ('editAccess', ?)",
+      JSON.stringify(this.editAccess),
+    )
+
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = this.getAttachment(socket)
+      if (attachment.role === 'editor') {
+        attachment.role = 'viewer'
+        this.setAttachment(socket, attachment)
+      }
+      this.send([socket], accessMessage(attachment.role, generation))
+    }
   }
 
   // ---- AI summary ----
@@ -207,7 +273,7 @@ export class BoardRoom extends DurableObject<Env> {
       ws.send(encoding.toUint8Array(encoder))
     } else if (step === SYNC_STEP_2 || step === SYNC_UPDATE) {
       // The client sent edits. View-only connections may not write.
-      if (!this.getAttachment(ws).canEdit) return
+      if (this.getAttachment(ws).role === 'viewer') return
       // Applying fires the doc's update event, which relays and saves it.
       syncProtocol.readSyncStep2(decoder, doc, ws)
     }
@@ -262,7 +328,13 @@ export class BoardRoom extends DurableObject<Env> {
   }
 
   private getAttachment(ws: WebSocket): Attachment {
-    return (ws.deserializeAttachment() as Attachment | null) ?? { canEdit: false, clocks: {} }
+    return (
+      (ws.deserializeAttachment() as Attachment | null) ?? {
+        role: 'viewer',
+        boardId: '',
+        clocks: {},
+      }
+    )
   }
 
   private setAttachment(ws: WebSocket, attachment: Attachment): void {
@@ -340,6 +412,14 @@ export class BoardRoom extends DurableObject<Env> {
     })
     this.updateRows = 0
   }
+}
+
+function accessMessage(role: Role, generation: number): Uint8Array {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, MESSAGE_ACCESS)
+  encoding.writeVarUint(encoder, ROLE_CODE[role])
+  encoding.writeVarUint(encoder, generation)
+  return encoding.toUint8Array(encoder)
 }
 
 /** SQLite stores blobs as ArrayBuffers; copy out exactly this view's bytes. */

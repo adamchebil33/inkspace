@@ -136,8 +136,9 @@ export class BoardStore {
   /**
    * View-only boards never change the document locally. (The server also
    * refuses writes from viewers; this keeps the local copy honest too.)
+   * Set by the editor, from what the server says this connection may do.
    */
-  readonly readOnly: boolean
+  readOnly: boolean
 
   private readonly shapes: Y.Map<Y.Map<unknown>>
   private readonly meta: Y.Map<unknown>

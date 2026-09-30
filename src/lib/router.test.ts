@@ -10,9 +10,9 @@ describe('routes', () => {
     expect(parseRoute('/b/abc123_-XYZ', '')).toEqual({
       page: 'board',
       boardId: 'abc123_-XYZ',
-      editKey: null,
+      key: null,
     })
-    expect(parseRoute('/b/abc123_-XYZ/', '#secret')).toMatchObject({ editKey: 'secret' })
+    expect(parseRoute('/b/abc123_-XYZ/', '#secret')).toMatchObject({ key: 'secret' })
   })
 
   it('rejects other paths and malformed ids', () => {

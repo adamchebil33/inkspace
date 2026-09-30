@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { forgetBoard, loadRecentBoards, rememberBoard, savedEditKey, timeAgo } from './recentBoards'
+import { forgetBoard, loadRecentBoards, rememberBoard, savedBoard, timeAgo } from './recentBoards'
 
 beforeEach(() => {
   const data = new Map<string, string>()
@@ -9,11 +9,13 @@ beforeEach(() => {
   })
 })
 
+const editor = { id: 'a', key: 'token', role: 'editor', title: '' } as const
+
 describe('recent boards', () => {
   it('lists the most recently opened board first, without duplicates', () => {
-    rememberBoard({ id: 'a', editKey: 'ka', title: 'First' }, 1)
-    rememberBoard({ id: 'b', editKey: null, title: 'Second' }, 2)
-    rememberBoard({ id: 'a', editKey: 'ka', title: 'First, renamed' }, 3)
+    rememberBoard({ ...editor, title: 'First' }, 1)
+    rememberBoard({ id: 'b', key: null, role: 'viewer', title: 'Second' }, 2)
+    rememberBoard({ ...editor, title: 'First, renamed' }, 3)
 
     expect(loadRecentBoards().map((b) => [b.id, b.title])).toEqual([
       ['a', 'First, renamed'],
@@ -21,17 +23,50 @@ describe('recent boards', () => {
     ])
   })
 
-  it('keeps the edit key when the board is later opened from a view link', () => {
-    rememberBoard({ id: 'a', editKey: 'secret', title: '' })
-    rememberBoard({ id: 'a', editKey: null, title: '' })
-    expect(savedEditKey('a')).toBe('secret')
-    expect(savedEditKey('unknown')).toBeNull()
+  it('never lets a lesser key replace the owner key', () => {
+    rememberBoard({ id: 'a', key: 'owner-secret', role: 'owner', title: '' })
+    // Later opened through an edit link, then a view link.
+    rememberBoard(editor)
+    rememberBoard({ id: 'a', key: null, role: 'viewer', title: '' })
+    expect(savedBoard('a')).toMatchObject({ key: 'owner-secret', role: 'owner' })
+  })
+
+  it('forgets an edit link that no longer works', () => {
+    rememberBoard(editor)
+    rememberBoard({ id: 'a', key: null, role: 'viewer', title: '' })
+    expect(savedBoard('a')).toMatchObject({ key: null, role: 'viewer' })
+    expect(savedBoard('unknown')).toBeUndefined()
+  })
+
+  it('reads entries saved by the earlier format', () => {
+    localStorage.setItem(
+      'inkspace:boards',
+      JSON.stringify([
+        { id: 'old', editKey: 'k', title: 'Old', openedAt: 1 },
+        { id: 'older', editKey: null, title: '', openedAt: 0 },
+      ]),
+    )
+    expect(loadRecentBoards()).toMatchObject([
+      { id: 'old', key: 'k', role: 'editor' },
+      { id: 'older', key: null, role: 'viewer' },
+    ])
   })
 
   it('forgets a board', () => {
-    rememberBoard({ id: 'a', editKey: null, title: '' })
+    rememberBoard(editor)
     forgetBoard('a')
     expect(loadRecentBoards()).toEqual([])
+  })
+
+  it('reports whether saving worked', () => {
+    expect(rememberBoard(editor)).toBe(true)
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('blocked')
+      },
+    })
+    expect(rememberBoard(editor)).toBe(false)
   })
 
   it('survives corrupt storage', () => {
