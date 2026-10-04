@@ -192,6 +192,7 @@ export class Editor {
   private state: EditorState
   private readonly measureText: (text: string) => number
   private readonly listeners = new Set<() => void>()
+  private readonly navigateListeners = new Set<() => void>()
   private readonly unsubscribeStore: () => void
 
   constructor(store: BoardStore, options: EditorOptions = {}) {
@@ -211,6 +212,7 @@ export class Editor {
   destroy(): void {
     this.unsubscribeStore()
     this.listeners.clear()
+    this.navigateListeners.clear()
   }
 
   // ---- State for the UI and the renderer ----
@@ -330,6 +332,7 @@ export class Editor {
 
   /** Escape: stop editing, then drop the tool, then clear the selection. */
   cancel(): void {
+    this.userNavigated()
     if (this.editingId) this.endEditing()
     else if (this.tool !== 'select') this.tool = 'select'
     else this.selection = []
@@ -520,6 +523,7 @@ export class Editor {
 
   wheel(input: WheelInput): void {
     this.interacted = true
+    this.userNavigated()
     if (input.zoom) {
       const factor = Math.exp(-input.deltaY * 0.01)
       this.camera = zoomAt(this.camera, input, this.camera.zoom * factor)
@@ -536,7 +540,41 @@ export class Editor {
   /** Zoom around the centre of the viewport (toolbar buttons). */
   setZoom(zoom: number): void {
     const center = { x: this.viewport.w / 2, y: this.viewport.h / 2 }
+    this.userNavigated()
     this.camera = zoomAt(this.camera, center, clampZoom(zoom))
+    this.emit()
+  }
+
+  /** Called whenever the user moves the view themselves (not when following). */
+  onUserNavigate(listener: () => void): () => void {
+    this.navigateListeners.add(listener)
+    return () => this.navigateListeners.delete(listener)
+  }
+
+  private userNavigated(): void {
+    for (const listener of this.navigateListeners) listener()
+  }
+
+  /** The part of the board on screen, in world coordinates. */
+  getViewRect(): Rect {
+    const { x, y, zoom } = this.camera
+    return { x, y, w: this.viewport.w / zoom, h: this.viewport.h / zoom }
+  }
+
+  /** The camera that shows all of `rect`, centred, as large as fits. */
+  cameraForRect(rect: Rect): Camera {
+    const { w, h } = this.viewport
+    const zoom = clampZoom(Math.min(w / rect.w, h / rect.h))
+    return {
+      zoom,
+      x: rect.x + rect.w / 2 - w / 2 / zoom,
+      y: rect.y + rect.h / 2 - h / 2 / zoom,
+    }
+  }
+
+  /** Move the view on someone else's behalf (follow mode). */
+  followCamera(camera: Camera): void {
+    this.camera = camera
     this.emit()
   }
 
@@ -545,6 +583,7 @@ export class Editor {
     const bounds = unionRects(this.store.list())
     const { w, h } = this.viewport
     if (!bounds || w === 0 || h === 0) return
+    this.userNavigated()
     const margin = 80
     const zoom = clampZoom(Math.min(1, (w - margin * 2) / bounds.w, (h - margin * 2) / bounds.h))
     this.camera = {
@@ -561,6 +600,7 @@ export class Editor {
    */
   pinch(from: Point, to: Point, scale: number): void {
     this.interacted = true
+    this.userNavigated()
     const zoomed = zoomAt(this.camera, from, this.camera.zoom * scale)
     this.camera = {
       ...zoomed,
@@ -584,6 +624,7 @@ export class Editor {
 
   /** Centre the view on a world point, e.g. to jump to someone's cursor. */
   centerOn(world: Point): void {
+    this.userNavigated()
     this.camera = {
       ...this.camera,
       x: world.x - this.viewport.w / 2 / this.camera.zoom,
@@ -619,6 +660,7 @@ export class Editor {
 
     if (p.button === 1 || (p.button === 0 && (this.spaceHeld || this.tool === 'hand'))) {
       this.interaction = { kind: 'pan', startScreen: p, startCamera: this.camera }
+      this.userNavigated()
     } else if (p.button !== 0) {
       // Other buttons do nothing, but editing has still ended.
     } else if (this.tool === 'select') {

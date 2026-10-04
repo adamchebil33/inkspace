@@ -2,6 +2,7 @@ import * as Y from 'yjs'
 import { loadUser } from '../lib/identity'
 import { measureText } from '../lib/measure'
 import { Editor } from './editor'
+import { Follow } from './follow'
 import { Presence } from './presence'
 import { BoardStore } from './store'
 import { SyncClient } from './sync-client'
@@ -13,6 +14,8 @@ export interface BoardSession {
   sync: SyncClient
   /** Who else is here, and where their cursors are. */
   presence: Presence
+  /** Follow mode: keeping this view on what someone else is looking at. */
+  follow: Follow
 }
 
 /**
@@ -37,7 +40,7 @@ export function createBoardSession(boardId: string, key: string | null): BoardSe
     if (access) editor.setReadOnly(access.role === 'viewer')
   })
 
-  // Share our cursor, selection and any pen stroke in progress. Presence drops repeats and throttles the
+  // Share our cursor, selection, view and any pen stroke in progress. Presence drops repeats and throttles the
   // cursor, so it is fine to call this on every editor change (including
   // pans and zooms, which move the world under a still pointer).
   const presence = new Presence(sync.awareness, loadUser())
@@ -45,6 +48,7 @@ export function createBoardSession(boardId: string, key: string | null): BoardSe
     presence.setDraft(editor.getDraft())
     presence.setCursor(editor.getPointerWorld())
     presence.setSelection(editor.getState().selection)
+    presence.setView(editor.getViewRect())
   })
 
   // A board that already has content opens framed around it, rather than on
@@ -53,5 +57,5 @@ export function createBoardSession(boardId: string, key: string | null): BoardSe
     if (!editor.hasInteracted()) editor.zoomToFit()
   })
 
-  return { editor, sync, presence }
+  return { editor, sync, presence, follow: new Follow(editor, presence) }
 }

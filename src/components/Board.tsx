@@ -7,6 +7,7 @@ import { getTheme } from '../lib/theme'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardHeader } from './BoardHeader'
 import { ConnectionStatus } from './ConnectionStatus'
+import { FollowBanner } from './FollowBanner'
 import { PresenceBar } from './PresenceBar'
 import { ShareMenu } from './ShareMenu'
 import { SummaryPanel } from './SummaryPanel'
@@ -26,7 +27,9 @@ interface Props {
 
 /** One board. Render with a `key` so a different board gets a fresh session. */
 export function Board({ boardId, accessKey, onAccessLost }: Props) {
-  const [{ editor, sync, presence }] = useState(() => createBoardSession(boardId, accessKey))
+  const [{ editor, sync, presence, follow }] = useState(() =>
+    createBoardSession(boardId, accessKey),
+  )
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
   // What the server lets this connection do; null until it has answered.
   const access = useSyncExternalStore(sync.subscribe, sync.getAccess)
@@ -82,13 +85,14 @@ export function Board({ boardId, accessKey, onAccessLost }: Props) {
 
   return (
     <div className="board">
-      <BoardCanvas editor={editor} presence={presence} />
+      <BoardCanvas editor={editor} presence={presence} follow={follow} />
       <TextEditor editor={editor} state={state} />
       <BoardHeader editor={editor} state={state} />
       <ConnectionStatus sync={sync} />
+      <FollowBanner presence={presence} follow={follow} />
       <div className="panel board-actions">
         {role === 'viewer' && <span className="badge">View only</span>}
-        <PresenceBar editor={editor} presence={presence} />
+        <PresenceBar presence={presence} follow={follow} />
         <button
           type="button"
           className="tool"

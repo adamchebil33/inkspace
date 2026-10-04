@@ -91,6 +91,69 @@ describe('Presence', () => {
     expect(bobPresence.getState().peers[0]?.draft).toBeNull()
   })
 
+  it('shares a view only while someone is following it', () => {
+    const [a, b] = connectedPair()
+    const adaPresence = new Presence(a, ada)
+    const bobPresence = new Presence(b, bob)
+    const view = { x: 10, y: 20, w: 800, h: 600 }
+
+    // Nobody follows Ada: panning around costs no messages.
+    let updates = 0
+    a.on('update', () => updates++)
+    adaPresence.setView(view)
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS * 3)
+    expect(updates).toBe(0)
+    expect(bobPresence.getState().peers[0]?.view).toBeNull()
+
+    // Bob follows: Ada's view goes out, and keeps up as it changes.
+    bobPresence.setFollowing(a.clientID)
+    expect(bobPresence.getState().following).toBe(a.clientID)
+    expect(bobPresence.getState().peers[0]?.view).toEqual(view)
+    adaPresence.setView({ ...view, x: 500 })
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS)
+    expect(bobPresence.getState().peers[0]?.view).toMatchObject({ x: 500 })
+
+    // Bob stops: Ada stops sharing.
+    bobPresence.setFollowing(null)
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS)
+    expect(bobPresence.getState().peers[0]?.view).toBeNull()
+  })
+
+  it('sends the cursor, stroke and view that changed together as one update', () => {
+    const [a, b] = connectedPair()
+    const adaPresence = new Presence(a, ada)
+    const bobPresence = new Presence(b, bob)
+    bobPresence.setFollowing(a.clientID)
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS)
+
+    // The first change goes out at once and opens a 50 ms window.
+    adaPresence.setCursor({ x: 1, y: 1 })
+    let updates = 0
+    a.on('update', () => updates++)
+
+    // Everything that changes inside the window is sent together at its end.
+    adaPresence.setDraft({ color: 'red', points: [0, 0, 5, 5] })
+    adaPresence.setView({ x: 1, y: 2, w: 3, h: 4 })
+    adaPresence.setCursor({ x: 5, y: 5 })
+    expect(updates).toBe(0)
+    vi.advanceTimersByTime(CURSOR_INTERVAL_MS)
+    expect(updates).toBe(1)
+    expect(bobPresence.getState().peers[0]).toMatchObject({
+      cursor: { x: 5, y: 5 },
+      draft: { color: 'red' },
+      view: { w: 3 },
+    })
+  })
+
+  it('stops following someone who leaves', () => {
+    const [a, b] = connectedPair()
+    new Presence(a, ada)
+    const bobPresence = new Presence(b, bob)
+    bobPresence.setFollowing(a.clientID)
+    a.setLocalState(null)
+    expect(bobPresence.getState().following).toBeNull()
+  })
+
   it('removes people when they leave', () => {
     const [a, b] = connectedPair()
     new Presence(a, ada)
@@ -110,6 +173,12 @@ describe('parsePeer', () => {
   it('tolerates a bad cursor or selection', () => {
     const peer = parsePeer(1, { user: ada, cursor: { x: 'NaN' }, selection: 'nope' })
     expect(peer).toMatchObject({ name: 'Ada', cursor: null, selection: [], draft: null })
+    expect(
+      parsePeer(1, { user: ada, following: 'x', view: { x: 0, y: 0, w: 0, h: 5 } }),
+    ).toMatchObject({
+      following: null,
+      view: null,
+    })
     expect(parsePeer(1, { user: ada, draft: { color: 'nope', points: [0, 0] } })?.draft).toBeNull()
     expect(parsePeer(1, { user: ada, draft: { color: 'red', points: [0, 'x'] } })?.draft).toBeNull()
   })
@@ -122,6 +191,8 @@ describe('CursorSmoother', () => {
     cursor: { x, y: 0 },
     selection: [],
     draft: null,
+    following: null,
+    view: null,
   })
 
   it('snaps to the first position, then eases toward new ones', () => {

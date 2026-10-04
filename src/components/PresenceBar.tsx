@@ -1,18 +1,18 @@
 import { useState, useSyncExternalStore } from 'react'
-import type { Editor } from '../board/editor'
+import type { Follow } from '../board/follow'
 import type { Presence } from '../board/presence'
 import { MAX_NAME_LENGTH, cleanName, initials, saveUser } from '../lib/identity'
 
 const MAX_AVATARS = 5
 
 interface Props {
-  editor: Editor
   presence: Presence
+  follow: Follow
 }
 
-/** Who is on the board. Click yourself to rename, someone else to find them. */
-export function PresenceBar({ editor, presence }: Props) {
-  const { user, peers } = useSyncExternalStore(presence.subscribe, presence.getState)
+/** Who is on the board. Click yourself to rename, someone else to follow their view. */
+export function PresenceBar({ presence, follow }: Props) {
+  const { user, peers, following } = useSyncExternalStore(presence.subscribe, presence.getState)
   const [draftName, setDraftName] = useState<string | null>(null)
 
   const commitName = () => {
@@ -49,9 +49,14 @@ export function PresenceBar({ editor, presence }: Props) {
               type="button"
               className="avatar"
               style={{ background: peer.color }}
-              title={peer.cursor ? `${peer.name}. Click to jump to their cursor` : peer.name}
+              title={
+                following === peer.id
+                  ? `Following ${peer.name}. Click to stop`
+                  : `${peer.name}. Click to follow their view`
+              }
               aria-label={peer.name}
-              onClick={() => peer.cursor && editor.centerOn(peer.cursor)}
+              aria-pressed={following === peer.id}
+              onClick={() => follow.toggle(peer.id)}
             >
               {initials(peer.name)}
             </button>

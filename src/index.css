@@ -873,3 +873,38 @@ a:focus-visible {
 .share-option svg {
   flex-shrink: 0;
 }
+
+/* ---- Follow mode ---- */
+
+.follow-frame {
+  position: absolute;
+  inset: 0;
+  border: 3px solid;
+  pointer-events: none;
+}
+
+.follow-pill {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.follow-pill:not(:has(button)) {
+  padding: 8px 14px;
+}
+
+.follow-pill .secondary {
+  height: 26px;
+}
+
+.avatar[aria-pressed='true'] {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+  position: relative;
+  z-index: 1;
+}

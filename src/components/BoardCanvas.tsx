@@ -1,5 +1,6 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Editor, PointerInput } from '../board/editor'
+import type { Follow } from '../board/follow'
 import { CursorSmoother, type Presence } from '../board/presence'
 import { render } from '../board/render'
 import { DARK_THEME, LIGHT_THEME } from '../board/theme'
@@ -16,7 +17,13 @@ function toInput(e: PointerEvent | MouseEvent, canvas: HTMLCanvasElement): Point
 }
 
 /** The drawing surface: forwards input to the editor and repaints on change. */
-export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Presence }) {
+interface Props {
+  editor: Editor
+  presence: Presence
+  follow: Follow
+}
+
+export function BoardCanvas({ editor, presence, follow }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -35,12 +42,14 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
       frame = 0
       const dpr = window.devicePixelRatio || 1
       const view = { width: canvas.clientWidth, height: canvas.clientHeight, dpr }
+      // In follow mode, first move our view toward the leader's.
+      const catchingUp = follow.step(now)
       const { peers, animating } = smoother.step(presence.getState().peers, now)
       const theme = getTheme() === 'dark' ? DARK_THEME : LIGHT_THEME
       render(ctx, view, { ...editor.getRenderState(), peers }, theme)
       canvas.style.cursor = editor.getCursor()
-      // Keep animating until every remote cursor has caught up.
-      if (animating) schedule()
+      // Keep animating until every remote cursor, and our view, has caught up.
+      if (animating || catchingUp) schedule()
     }
 
     const resize = () => {
@@ -81,7 +90,7 @@ export function BoardCanvas({ editor, presence }: { editor: Editor; presence: Pr
       unsubscribePresence()
       unsubscribeTheme()
     }
-  }, [editor, presence])
+  }, [editor, presence, follow])
 
   // Fingers currently on the screen, for two-finger pan and pinch zoom.
   const touches = useRef(new Map<number, { x: number; y: number }>())
