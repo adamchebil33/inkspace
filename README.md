@@ -18,6 +18,8 @@ offline merge when the connection returns, and undo only reverts your own change
   work offline. Both people's changes are kept and every copy of the board ends up identical.
 - **Arrows that stay attached.** Draw an arrow from one shape to another and it follows them
   when either is moved, by anyone.
+- **Templates.** Start from a brainstorm, retrospective, kanban or flowchart board, each
+  previewed on the home page by the same renderer as the board itself.
 - **Follow mode.** Click someone's avatar and your view follows theirs as they pan and zoom,
   for presenting or walking someone through a board.
 - **A real canvas editor.** Pan and zoom, marquee select, move, resize, duplicate,

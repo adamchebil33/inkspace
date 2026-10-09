@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { downloadCanvas, exportFilename, renderBoardImage } from '../board/export'
 import { createBoardSession } from '../board/session'
+import type { TemplateId } from '../board/templates'
 import { DARK_THEME, LIGHT_THEME } from '../board/theme'
 import { rememberBoard } from '../lib/recentBoards'
 import { getTheme } from '../lib/theme'
@@ -23,12 +24,14 @@ interface Props {
   accessKey: string | null
   /** This browser could edit, and the server has just withdrawn that. */
   onAccessLost: () => void
+  /** Starter content, for a board that was just created from a template. */
+  template?: TemplateId | null
 }
 
 /** One board. Render with a `key` so a different board gets a fresh session. */
-export function Board({ boardId, accessKey, onAccessLost }: Props) {
+export function Board({ boardId, accessKey, onAccessLost, template = null }: Props) {
   const [{ editor, sync, presence, follow }] = useState(() =>
-    createBoardSession(boardId, accessKey),
+    createBoardSession(boardId, accessKey, template),
   )
   const state = useSyncExternalStore(editor.subscribe, editor.getState)
   // What the server lets this connection do; null until it has answered.

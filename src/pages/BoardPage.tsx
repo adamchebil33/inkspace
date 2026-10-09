@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { isTemplateId } from '../board/templates'
 import { Board } from '../components/Board'
 import { savedBoard } from '../lib/recentBoards'
 
@@ -24,12 +25,23 @@ export function BoardPage({ boardId, linkKey }: Props) {
   // browser's edit access is withdrawn (see Board).
   const [epoch, setEpoch] = useState(0)
 
+  // The home page passes the chosen template in the history entry. Read it
+  // once, then clear it, so going back and forth never applies it again.
+  const [template] = useState(() => {
+    const value = (history.state as { template?: unknown } | null)?.template
+    return isTemplateId(value) ? value : null
+  })
+  useEffect(() => {
+    if (template) history.replaceState(null, '', location.href)
+  }, [template])
+
   return (
     <Board
       key={`${boardId}:${epoch}`}
       boardId={boardId}
       accessKey={chooseKey(boardId, linkKey)}
       onAccessLost={() => setEpoch((n) => n + 1)}
+      template={epoch === 0 ? template : null}
     />
   )
 }

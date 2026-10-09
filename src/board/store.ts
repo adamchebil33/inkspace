@@ -128,6 +128,12 @@ function decodePoints(raw: unknown): readonly number[] | null {
  * different properties of one shape (one person moves it, another recolours
  * it) merge instead of overwriting each other.
  */
+/** `shapes` with every attached arrow given its real geometry. */
+export function resolveShapes(shapes: readonly Shape[]): Shape[] {
+  const byId = new Map(shapes.map((s) => [s.id, s]))
+  return shapes.map((s) => (s.type === 'arrow' ? resolveArrow(s, byId) : s))
+}
+
 export class BoardStore {
   readonly doc: Y.Doc
   /** Transaction origin for local edits, used to scope undo to this user. */
@@ -192,8 +198,7 @@ export class BoardStore {
       })
       shapes.sort((a, b) => a.z - b.z || (a.id < b.id ? -1 : 1))
       // Attached arrows take their position from the shapes they point at.
-      const stored = new Map(shapes.map((s) => [s.id, s]))
-      this.sorted = shapes.map((s) => (s.type === 'arrow' ? resolveArrow(s, stored) : s))
+      this.sorted = resolveShapes(shapes)
       this.byId = new Map(this.sorted.map((s) => [s.id, s]))
     }
     return this.sorted
@@ -299,6 +304,12 @@ export class BoardStore {
 
   canRedo(): boolean {
     return this.history.canRedo()
+  }
+
+  /** Forget all undo and redo steps (for content the user did not make). */
+  clearHistory(): void {
+    this.history.clear()
+    this.handleHistoryChange()
   }
 
   /**

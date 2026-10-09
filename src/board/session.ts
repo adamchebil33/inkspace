@@ -5,6 +5,7 @@ import { Editor } from './editor'
 import { Follow } from './follow'
 import { Presence } from './presence'
 import { BoardStore } from './store'
+import { applyTemplate, type TemplateId } from './templates'
 import { SyncClient } from './sync-client'
 
 /** Everything that belongs to one open board. */
@@ -23,7 +24,12 @@ export interface BoardSession {
  * board. `key` is the owner key or edit token from the link, if any. Call
  * `sync.connect()` to go live.
  */
-export function createBoardSession(boardId: string, key: string | null): BoardSession {
+export function createBoardSession(
+  boardId: string,
+  key: string | null,
+  /** Starter content for a board that was just created. */
+  template: TemplateId | null = null,
+): BoardSession {
   const doc = new Y.Doc()
   // View-only until the server says otherwise. Whether a key still grants
   // edit access is the server's call (an edit link can be revoked), so the
@@ -54,6 +60,11 @@ export function createBoardSession(boardId: string, key: string | null): BoardSe
   // A board that already has content opens framed around it, rather than on
   // an empty patch of canvas (unless the user has already started moving).
   sync.onceSynced(() => {
+    // Only into a board that is really empty, and only if we may edit it.
+    // (By now the server has told us our role: it does so before syncing.)
+    if (template && !editor.store.readOnly && editor.store.list().length === 0) {
+      applyTemplate(editor.store, template, measureText)
+    }
     if (!editor.hasInteracted()) editor.zoomToFit()
   })
 

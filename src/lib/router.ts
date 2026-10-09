@@ -21,9 +21,9 @@ export const boardPath = (boardId: string, key?: string | null) =>
 
 const NAVIGATE_EVENT = 'inkspace:navigate'
 
-/** Client-side navigation without a page load. */
-export function navigate(to: string): void {
-  history.pushState(null, '', to)
+/** Client-side navigation without a page load. `state` is readable as `history.state`. */
+export function navigate(to: string, state: unknown = null): void {
+  history.pushState(state, '', to)
   window.dispatchEvent(new Event(NAVIGATE_EVENT))
 }
 

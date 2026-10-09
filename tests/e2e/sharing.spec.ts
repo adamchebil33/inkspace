@@ -201,3 +201,30 @@ test('the home page shows your name, ready to keep or change', async ({ browser 
   await name.blur()
   await expect(name).toHaveValue('Ada Lovelace')
 })
+
+test('a board created from a template starts filled, for everyone', async ({ browser }) => {
+  const context = await browser.newContext()
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const page = await context.newPage()
+  await page.goto('/')
+  await page.getByRole('button', { name: 'New Retrospective board' }).click()
+
+  await expect(page.getByRole('textbox', { name: 'Board title' })).toHaveValue('Retrospective')
+  await expect.poll(async () => (await shapes(page)).length).toBeGreaterThan(5)
+  const created = await shapes(page)
+  expect(created.map((s) => s.text)).toContain('Went well')
+  // The template is where the board starts, not something to undo.
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled()
+
+  // Someone joining sees the same board.
+  await page.getByRole('button', { name: 'Share' }).click()
+  await page.getByRole('button', { name: /Copy edit link/ }).click()
+  const guest = await openBoard(browser, await page.evaluate(() => navigator.clipboard.readText()))
+  await expect.poll(async () => (await shapes(guest)).length).toBe(created.length)
+
+  // Reloading does not add it a second time.
+  await page.reload()
+  await expect(page.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+  await page.waitForTimeout(500)
+  expect(await shapes(page)).toHaveLength(created.length)
+})

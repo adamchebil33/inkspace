@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { boardIdForOwner, newOwnerKey } from '../../shared/boardKey'
+import { TEMPLATES, type TemplateId } from '../board/templates'
 import { Logo } from '../components/icons'
+import { TemplatePreview } from '../components/TemplatePreview'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { MAX_NAME_LENGTH, cleanName, initials, loadUser, saveUser } from '../lib/identity'
 import { forgetBoard, loadRecentBoards, rememberBoard, timeAgo } from '../lib/recentBoards'
@@ -13,11 +15,11 @@ const REPO_URL = 'https://github.com/adamchebil33/inkspace'
  * there. The key is saved in this browser, which makes this browser the
  * board's owner. It only goes into the address if it could not be saved.
  */
-async function createBoard(): Promise<void> {
+async function createBoard(template?: TemplateId): Promise<void> {
   const ownerKey = newOwnerKey()
   const id = await boardIdForOwner(ownerKey)
   const saved = rememberBoard({ id, key: ownerKey, role: 'owner', title: '' })
-  navigate(boardPath(id, saved ? null : ownerKey))
+  navigate(boardPath(id, saved ? null : ownerKey), template ? { template } : null)
 }
 
 const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'View only' } as const
@@ -76,6 +78,26 @@ export function Home() {
           </button>
           <span className="hint">Tip: open your board in two windows to watch them sync.</span>
         </form>
+
+        <section aria-labelledby="templates-heading">
+          <h2 id="templates-heading">Or start from a template</h2>
+          <ul className="template-list">
+            {TEMPLATES.map((template) => (
+              <li key={template.id}>
+                <button
+                  type="button"
+                  className="template-card"
+                  aria-label={`New ${template.name} board`}
+                  onClick={() => void createBoard(template.id)}
+                >
+                  <TemplatePreview id={template.id} />
+                  <strong>{template.name}</strong>
+                  <small>{template.description}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         <Preview />
 
