@@ -20,6 +20,8 @@ offline merge when the connection returns, and undo only reverts your own change
   when either is moved, by anyone.
 - **Templates.** Start from a brainstorm, retrospective, kanban or flowchart board, each
   previewed on the home page by the same renderer as the board itself.
+- **Smart guides.** Shapes snap to each other's edges and centres while you move, resize or
+  draw them, with guide lines showing what lined up.
 - **Follow mode.** Click someone's avatar and your view follows theirs as they pan and zoom,
   for presenting or walking someone through a board.
 - **A real canvas editor.** Pan and zoom, marquee select, move, resize, duplicate,

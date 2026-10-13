@@ -8,6 +8,8 @@ export interface Theme {
   handleFill: string
   /** Default colour for pen, arrows and text: dark on light, light on dark. */
   ink: string
+  /** Alignment guides while snapping. */
+  guide: string
 }
 
 export const LIGHT_THEME: Theme = {
@@ -17,6 +19,7 @@ export const LIGHT_THEME: Theme = {
   marqueeFill: 'rgba(79, 70, 229, 0.08)',
   handleFill: '#ffffff',
   ink: '#1c1c1a',
+  guide: '#e64980',
 }
 
 export const DARK_THEME: Theme = {
@@ -26,6 +29,7 @@ export const DARK_THEME: Theme = {
   marqueeFill: 'rgba(129, 140, 248, 0.12)',
   handleFill: '#161618',
   ink: '#ededeb',
+  guide: '#f783ac',
 }
 
 /** Shapes keep the same colours in both themes, like paper on a dark desk. */

@@ -13,6 +13,7 @@ function toInput(e: PointerEvent | MouseEvent, canvas: HTMLCanvasElement): Point
     y: e.clientY - rect.top,
     button: e.button,
     shift: e.shiftKey,
+    ctrl: e.ctrlKey || e.metaKey,
   }
 }
 

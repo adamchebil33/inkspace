@@ -19,6 +19,7 @@ import {
   type Rect,
 } from './geometry'
 import type { Draft } from './presence'
+import { snapMove, snapPoint, snapResize, type Guide } from './snapping'
 import { HANDLE_SIZE, type RenderState } from './render'
 import type { BoardStore, ShapePatch } from './store'
 import { FONT_SIZE, LINE_HEIGHT, textBlockSize, textScale } from './text'
@@ -37,6 +38,8 @@ export interface PointerInput {
   y: number
   button: number
   shift: boolean
+  /** Ctrl or Cmd held: turn snapping off for this gesture. */
+  ctrl?: boolean
 }
 
 export interface WheelInput {
@@ -113,6 +116,8 @@ const MIN_SHAPE_SIZE = 8
 const DUPLICATE_OFFSET = 20
 /** Screen pixels within which a thin line still counts as hit. */
 const LINE_HIT_TOLERANCE = 7
+/** Screen pixels within which an edge or centre snaps to another shape's. */
+const SNAP_DISTANCE = 6
 const DEFAULT_ARROW_LENGTH = 160
 
 const DEFAULT_SIZE: Record<BoxType, { w: number; h: number }> = {
@@ -186,6 +191,8 @@ export class Editor {
   private interaction: Interaction = { kind: 'idle' }
   private pointer: Point = { x: 0, y: 0 }
   private pointerInside = false
+  /** Alignment guides to draw while a move, resize or creation is snapping. */
+  private guides: Guide[] = []
   private interacted = false
   private docVersion = 0
 
@@ -235,6 +242,7 @@ export class Editor {
       editingId: this.editingId,
       draft: this.getDraft(),
       attachTargetId: i.kind === 'endpoint' ? i.targetId : null,
+      guides: this.guides,
     }
   }
 
@@ -613,6 +621,7 @@ export class Editor {
   /** Drop whatever gesture is in progress (a second finger touched down). */
   cancelGesture(): void {
     this.interaction = { kind: 'idle' }
+    this.guides = []
     this.store.commit()
     this.emit()
   }
@@ -754,8 +763,23 @@ export class Editor {
       case 'move': {
         if (!i.dragged && distance(p, i.startScreen) < DRAG_THRESHOLD) break
         i.dragged = true
-        const dx = world.x - i.startWorld.x
-        const dy = world.y - i.startWorld.y
+        let dx = world.x - i.startWorld.x
+        let dy = world.y - i.startWorld.y
+        // Snap the selection's bounding box to the shapes around it. An
+        // arrow's box is just its two ends, so arrows do not count.
+        const bounds = unionRects([...i.originals.values()].filter((s) => s.type !== 'arrow'))
+        if (bounds && !p.ctrl) {
+          const snap = snapMove(
+            { ...bounds, x: bounds.x + dx, y: bounds.y + dy },
+            this.snapTargets(new Set(i.originals.keys())),
+            SNAP_DISTANCE / this.camera.zoom,
+          )
+          dx += snap.dx
+          dy += snap.dy
+          this.guides = snap.guides
+        } else {
+          this.guides = []
+        }
         this.store.transact(() => {
           for (const [id, original] of i.originals) {
             this.store.update(
@@ -770,13 +794,28 @@ export class Editor {
       case 'resize': {
         // Text scales as a whole, so it always keeps its proportions.
         const isText = this.store.get(i.id)?.type === 'text'
-        this.store.update(
-          i.id,
-          resizeRect(i.original, i.handle, world.x - i.startWorld.x, world.y - i.startWorld.y, {
-            minSize: MIN_SHAPE_SIZE,
-            keepAspect: p.shift || isText,
-          }),
+        const keepAspect = p.shift || isText
+        let rect = resizeRect(
+          i.original,
+          i.handle,
+          world.x - i.startWorld.x,
+          world.y - i.startWorld.y,
+          { minSize: MIN_SHAPE_SIZE, keepAspect },
         )
+        this.guides = []
+        // Snapping one edge would break a kept aspect ratio, so skip it then.
+        if (!keepAspect && !p.ctrl) {
+          const snap = snapResize(
+            rect,
+            i.handle,
+            this.snapTargets(new Set([i.id])),
+            SNAP_DISTANCE / this.camera.zoom,
+            MIN_SHAPE_SIZE,
+          )
+          rect = snap.rect
+          this.guides = snap.guides
+        }
+        this.store.update(i.id, rect)
         break
       }
 
@@ -828,7 +867,7 @@ export class Editor {
 
   private dragCreate(i: Interaction & { kind: 'create' }, p: PointerInput, world: Point): void {
     if (i.id) {
-      this.store.update(i.id, rectFromPoints(i.startWorld, world))
+      this.store.update(i.id, rectFromPoints(i.startWorld, this.snapCorner(world, p, i.id)))
       return
     }
     // Text is placed with a click; dragging the text tool does nothing extra.
@@ -854,13 +893,25 @@ export class Editor {
       this.moveEndpoint(endpoint, world)
       return
     }
-    i.id = this.createShape(i.type, rectFromPoints(i.startWorld, world))
+    // Snapped from the very move that creates it, not only from the next one.
+    i.id = this.createShape(i.type, rectFromPoints(i.startWorld, this.snapCorner(world, p, null)))
+  }
+
+  /** The corner being dragged out, snapped to nearby shapes unless Ctrl is held. */
+  private snapCorner(world: Point, p: PointerInput, creatingId: string | null): Point {
+    this.guides = []
+    if (p.ctrl) return world
+    const exclude = new Set(creatingId ? [creatingId] : [])
+    const snap = snapPoint(world, this.snapTargets(exclude), SNAP_DISTANCE / this.camera.zoom)
+    this.guides = snap.guides
+    return snap.point
   }
 
   pointerUp(p: PointerInput): void {
     this.pointer = p
     const i = this.interaction
     this.interaction = { kind: 'idle' }
+    this.guides = []
 
     if (i.kind === 'move' && !i.dragged && i.collapseTo) {
       this.selection = [i.collapseTo]
@@ -969,6 +1020,22 @@ export class Editor {
   /** Topmost shape under a world point, with some slack for thin lines. */
   private shapeAt(world: Point): Shape | undefined {
     return topShapeAt(this.store.list(), world, LINE_HIT_TOLERANCE / this.camera.zoom)
+  }
+
+  /**
+   * Shapes something can snap to: everything on or near the screen except
+   * the shapes being changed, arrows and pen strokes (whose boxes are not
+   * edges anyone would align to).
+   */
+  private snapTargets(exclude: ReadonlySet<string>): Rect[] {
+    const view = this.getViewRect()
+    const area = { x: view.x - view.w, y: view.y - view.h, w: view.w * 3, h: view.h * 3 }
+    return this.store
+      .list()
+      .filter(
+        (s) =>
+          !exclude.has(s.id) && s.type !== 'arrow' && s.type !== 'pen' && rectsIntersect(s, area),
+      )
   }
 
   /** Topmost shape an arrow end can attach to at a world point. */

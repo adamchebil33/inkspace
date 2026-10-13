@@ -10,6 +10,7 @@ import {
   type Rect,
 } from './geometry'
 import type { Draft, Peer } from './presence'
+import type { Guide } from './snapping'
 import { FONT, FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, textScale, textWidth, wrapText } from './text'
 import { PALETTE, SHAPE_TEXT_COLOR, inkColor, type Theme } from './theme'
 import type { Shape } from './types'
@@ -27,6 +28,8 @@ export interface RenderState {
   peers: readonly Peer[]
   /** Shape an arrow end would attach to if released now. */
   attachTargetId?: string | null
+  /** Alignment guides shown while snapping. */
+  guides?: readonly Guide[]
   /** Leave out the dot grid (image export). */
   hideGrid?: boolean
 }
@@ -94,6 +97,22 @@ export function render(
     ctx.stroke()
   }
   drawSelection(ctx, state, theme)
+
+  if (state.guides?.length) {
+    ctx.strokeStyle = theme.guide
+    ctx.lineWidth = 1 / zoom
+    ctx.beginPath()
+    for (const guide of state.guides) {
+      if (guide.axis === 'x') {
+        ctx.moveTo(guide.at, guide.from)
+        ctx.lineTo(guide.at, guide.to)
+      } else {
+        ctx.moveTo(guide.from, guide.at)
+        ctx.lineTo(guide.to, guide.at)
+      }
+    }
+    ctx.stroke()
+  }
 
   if (state.marquee) {
     const m = state.marquee

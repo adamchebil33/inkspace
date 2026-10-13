@@ -560,3 +560,67 @@ describe('access changes', () => {
     expect(store.list()).toHaveLength(2)
   })
 })
+
+describe('snapping', () => {
+  // A 100x100 rectangle at the origin to line things up with.
+  const anchor = () => drawRect(0, 0, 100, 100)
+
+  it('snaps a moved shape to line up with another, and shows a guide while dragging', () => {
+    anchor()
+    const id = drawRect(300, 300, 400, 400)
+    // Drag so that its left edge lands at 103, just right of the anchor's right edge.
+    editor.pointerDown(at(350, 350))
+    editor.pointerMove(at(153, 350))
+    expect(store.get(id)).toMatchObject({ x: 100 })
+    expect(editor.getRenderState().guides).toEqual([{ axis: 'x', at: 100, from: 0, to: 400 }])
+
+    editor.pointerUp(at(153, 350))
+    expect(editor.getRenderState().guides).toEqual([])
+    expect(store.get(id)).toMatchObject({ x: 100, y: 300 })
+  })
+
+  it('does not snap while Ctrl is held', () => {
+    anchor()
+    const id = drawRect(300, 300, 400, 400)
+    drag(at(350, 350), at(153, 350, { ctrl: true }))
+    expect(store.get(id)).toMatchObject({ x: 103 })
+  })
+
+  it('snaps the edge being resized', () => {
+    anchor()
+    const id = drawRect(0, 300, 60, 360)
+    // Drag the right edge from 60 to 97: it snaps to the anchor's right edge.
+    drag(at(60, 330), at(97, 330))
+    expect(store.get(id)).toMatchObject({ x: 0, w: 100 })
+  })
+
+  it('snaps the corner when drawing out a shape', () => {
+    anchor()
+    editor.setTool('rect')
+    drag(at(200, 200), at(298, 52))
+    const created = store.list().at(-1)!
+    // The top edge snapped to the anchor's middle line (y = 50).
+    expect(created).toMatchObject({ y: 50, h: 150 })
+  })
+
+  it('snaps distances in screen pixels, so it feels the same at any zoom', () => {
+    anchor()
+    const id = drawRect(300, 300, 400, 400)
+    editor.wheel({ x: 0, y: 0, deltaX: 0, deltaY: -Math.log(4) * 100, zoom: true })
+    // At 4x zoom, 6 screen pixels is 1.5 world units: a gap of 3 is too far.
+    const { zoom } = editor.getState().camera
+    expect(zoom).toBeCloseTo(4)
+    const toScreen = (x: number, y: number) => at(x * zoom, y * zoom)
+    drag(toScreen(350, 350), toScreen(153, 350))
+    expect(store.get(id)!.x).toBeCloseTo(103)
+  })
+
+  it('does not snap a lone arrow being moved', () => {
+    anchor()
+    editor.setTool('arrow')
+    drag(at(300, 300), at(500, 300))
+    const arrow = store.list().find((s) => s.type === 'arrow')!
+    drag(at(400, 300), at(203, 300))
+    expect(store.get(arrow.id)!.x).toBeCloseTo(103)
+  })
+})

@@ -27,6 +27,7 @@ const GROUPS: { title: string; rows: [keys: string[], action: string][] }[] = [
       [[mod, 'A'], 'Select all'],
       [['Delete'], 'Delete selection'],
       [['Arrows'], 'Nudge (Shift for more)'],
+      [[mod, 'drag'], 'Move or resize without snapping'],
       [[']'], 'Bring to front'],
       [['['], 'Send to back'],
       [['Esc'], 'Deselect or stop editing'],
