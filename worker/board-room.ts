@@ -25,6 +25,8 @@ const MESSAGE_ACCESS = 4
 const MESSAGE_RESET_EDIT_LINK = 5
 
 const ROLE_CODE: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 }
+/** Flag in the access message: the board has reached its size limit. */
+const BOARD_FULL = 1
 
 // Sync sub-message types (y-protocols/sync).
 const SYNC_STEP_1 = 0
@@ -39,6 +41,13 @@ const FLUSH_DELAY_MS = 1000
 const COMPACT_AFTER_ROWS = 50
 /** SQLite values are capped at 2 MB, so snapshots are stored in chunks. */
 const SNAPSHOT_CHUNK_BYTES = 1024 * 1024
+
+/**
+ * Largest a board may grow, measured as its saved size. Past this the board
+ * becomes read-only for everyone: it protects the free plan's storage and
+ * keeps the full-board download a new visitor receives reasonably small.
+ */
+export const MAX_BOARD_BYTES = 2 * 1024 * 1024
 
 /** At most one new AI summary per board in this time. */
 const SUMMARY_COOLDOWN_MS = 15_000
@@ -76,6 +85,10 @@ export class BoardRoom extends DurableObject<Env> {
   private pending: Uint8Array[] = []
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private updateRows = 0
+  /** Saved size so far: exact after compaction, an upper bound in between. */
+  private storedBytes = 0
+  /** The board has reached `MAX_BOARD_BYTES` and accepts no more edits. */
+  private full = false
   private lastSummary: { fingerprint: string; summary: BoardSummary } | null = null
   private lastSummaryAt = 0
   private editAccess: EditAccess | null = null
@@ -109,12 +122,14 @@ export class BoardRoom extends DurableObject<Env> {
     const boardId = url.pathname.split('/').pop() ?? ''
     const access = this.getEditAccess(boardId)
     const role = await resolveRole(boardId, url.searchParams.get('key'), access)
+    // Loading the document also tells us whether the board is full.
+    this.getDoc()
 
     const { 0: client, 1: server } = new WebSocketPair()
     this.ctx.acceptWebSocket(server)
     this.setAttachment(server, { role, boardId, clocks: {} })
     // First thing the client learns is what it is allowed to do.
-    server.send(accessMessage(role, access.generation))
+    server.send(accessMessage(role, access.generation, this.full))
 
     // Ask the newcomer what it has that we don't (it asks us the same).
     const encoder = encoding.createEncoder()
@@ -217,7 +232,7 @@ export class BoardRoom extends DurableObject<Env> {
         attachment.role = 'viewer'
         this.setAttachment(socket, attachment)
       }
-      this.send([socket], accessMessage(attachment.role, generation))
+      this.send([socket], accessMessage(attachment.role, generation, this.full))
     }
   }
 
@@ -273,7 +288,8 @@ export class BoardRoom extends DurableObject<Env> {
       ws.send(encoding.toUint8Array(encoder))
     } else if (step === SYNC_STEP_2 || step === SYNC_UPDATE) {
       // The client sent edits. View-only connections may not write.
-      if (this.getAttachment(ws).role === 'viewer') return
+      // A full board takes no more edits from anyone.
+      if (this.getAttachment(ws).role === 'viewer' || this.full) return
       // Applying fires the doc's update event, which relays and saves it.
       syncProtocol.readSyncStep2(decoder, doc, ws)
     }
@@ -354,16 +370,43 @@ export class BoardRoom extends DurableObject<Env> {
       .toArray()
       .map((row) => new Uint8Array(row.data))
     if (chunks.length > 0) Y.applyUpdate(doc, concat(chunks))
+    this.storedBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
 
     this.updateRows = 0
     for (const row of sql.exec<{ data: ArrayBuffer }>('SELECT data FROM updates ORDER BY id')) {
       Y.applyUpdate(doc, new Uint8Array(row.data))
       this.updateRows++
+      this.storedBytes += row.data.byteLength
     }
 
     doc.on('update', this.handleDocUpdate)
     this.doc = doc
+    if (this.storedBytes > MAX_BOARD_BYTES) this.measureSize()
     return doc
+  }
+
+  /**
+   * The running total over-counts (edits to the same thing add up, deleted
+   * content is still counted), so before declaring the board full, compact
+   * it and take its real size. That costs one full encode, and happens only
+   * when a board is near the limit.
+   */
+  private measureSize(): void {
+    this.flush()
+    this.compact()
+    const wasFull = this.full
+    this.full = this.storedBytes > MAX_BOARD_BYTES
+    if (this.full && !wasFull) this.announceFull()
+  }
+
+  /** Tell everyone the board is now read-only. */
+  private announceFull(): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      const { role, boardId } = this.getAttachment(socket)
+      if (!boardId) continue
+      const { generation } = this.getEditAccess(boardId)
+      this.send([socket], accessMessage(role, generation, true))
+    }
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
@@ -382,6 +425,9 @@ export class BoardRoom extends DurableObject<Env> {
     // when they reconnect.
     this.pending.push(update)
     this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_DELAY_MS)
+
+    this.storedBytes += update.byteLength
+    if (!this.full && this.storedBytes > MAX_BOARD_BYTES) this.measureSize()
   }
 
   private flush(): void {
@@ -411,14 +457,16 @@ export class BoardRoom extends DurableObject<Env> {
       sql.exec('DELETE FROM updates')
     })
     this.updateRows = 0
+    this.storedBytes = snapshot.byteLength
   }
 }
 
-function accessMessage(role: Role, generation: number): Uint8Array {
+function accessMessage(role: Role, generation: number, full: boolean): Uint8Array {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MESSAGE_ACCESS)
   encoding.writeVarUint(encoder, ROLE_CODE[role])
   encoding.writeVarUint(encoder, generation)
+  encoding.writeVarUint(encoder, full ? BOARD_FULL : 0)
   return encoding.toUint8Array(encoder)
 }
 

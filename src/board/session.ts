@@ -43,7 +43,7 @@ export function createBoardSession(
 
   sync.subscribe(() => {
     const access = sync.getAccess()
-    if (access) editor.setReadOnly(access.role === 'viewer')
+    if (access) editor.setReadOnly(access.role === 'viewer' || access.full)
   })
 
   // Share our cursor, selection, view and any pen stroke in progress. Presence drops repeats and throttles the

@@ -26,7 +26,12 @@ export interface Access {
   role: Role
   /** How many times the board's edit link has been reset. */
   generation: number
+  /** The board has reached its size limit and takes no more edits. */
+  full: boolean
 }
+
+/** Flag in the access message: the board is full. */
+const BOARD_FULL = 1
 
 const PING_INTERVAL_MS = 20_000
 /** No message of any kind for this long means the connection is dead. */
@@ -257,8 +262,11 @@ export class SyncClient {
     } else if (type === MESSAGE_ACCESS) {
       const role = ROLES[decoding.readVarUint(decoder)] ?? 'viewer'
       const generation = decoding.readVarUint(decoder)
-      if (role !== this.access?.role || generation !== this.access.generation) {
-        this.access = { role, generation }
+      const flags = decoding.hasContent(decoder) ? decoding.readVarUint(decoder) : 0
+      const full = (flags & BOARD_FULL) !== 0
+      const before = this.access
+      if (role !== before?.role || generation !== before.generation || full !== before.full) {
+        this.access = { role, generation, full }
         for (const listener of this.listeners) listener()
       }
     }

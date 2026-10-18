@@ -71,15 +71,16 @@ export function Board({ boardId, accessKey, onAccessLost, template = null }: Pro
     }
   }, [boardId, accessKey, role, title])
 
-  // If the edit link is reset while this person is editing with it, their
-  // copy may hold edits the server will now refuse. Start again from the
-  // server's version, view-only.
+  // If this person was editing and no longer may (the edit link was reset,
+  // or the board filled up), their copy may hold edits the server refused.
+  // Start again from the server's version, view-only.
+  const editable = access ? access.role !== 'viewer' && !access.full : null
   const couldEdit = useRef(false)
   useEffect(() => {
-    if (!role) return
-    if (couldEdit.current && role === 'viewer') onAccessLost()
-    couldEdit.current = role !== 'viewer'
-  }, [role, onAccessLost])
+    if (editable === null) return
+    if (couldEdit.current && !editable) onAccessLost()
+    couldEdit.current = editable
+  }, [editable, onAccessLost])
 
   // Exposed in development for console debugging and the end-to-end tests.
   useEffect(() => {
@@ -92,6 +93,12 @@ export function Board({ boardId, accessKey, onAccessLost, template = null }: Pro
       <TextEditor editor={editor} state={state} />
       <BoardHeader editor={editor} state={state} />
       <ConnectionStatus sync={sync} />
+      {access?.full && (
+        <div className="panel board-full" role="status">
+          This board has reached its size limit and is now read-only. You can still view it, follow
+          others and download it as a PNG.
+        </div>
+      )}
       <FollowBanner presence={presence} follow={follow} />
       <div className="panel board-actions">
         {role === 'viewer' && <span className="badge">View only</span>}

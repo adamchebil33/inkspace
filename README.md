@@ -142,8 +142,8 @@ panel is affected.
 
 Everything runs on Cloudflare's free plan with no credit card: one Worker serves the
 frontend, the API and the Durable Objects. The free plan's daily limits shaped the
-design: cursor updates are throttled to 20 a second, saves are batched, and idle boards
-hibernate.
+design: cursor updates are throttled to 20 a second, saves are batched, idle boards
+hibernate, and each board is capped in size.
 
 ## Tech stack
 
@@ -241,3 +241,4 @@ tests/e2e/        Playwright tests
 
 - The owner link cannot be revoked, so whoever has it controls the board. Keep it private.
 - The list of recent boards lives in the browser, not in an account.
+- Each board is capped at 2 MB of data. A board that reaches it becomes read-only.

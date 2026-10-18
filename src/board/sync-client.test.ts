@@ -158,21 +158,25 @@ describe('SyncClient', () => {
     socket.open()
     expect(client.getAccess()).toBeNull()
 
-    // [access][role: 1 = editor][generation 0]
-    socket.receive(new Uint8Array([4, 1, 0]))
-    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0 })
+    // [access][role: 1 = editor][generation 0][flags 0]
+    socket.receive(new Uint8Array([4, 1, 0, 0]))
+    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0, full: false })
     const afterFirst = changes
-    socket.receive(new Uint8Array([4, 1, 0]))
+    socket.receive(new Uint8Array([4, 1, 0, 0]))
     expect(changes).toBe(afterFirst)
 
     socket.close()
-    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0 })
+    expect(client.getAccess()).toEqual({ role: 'editor', generation: 0, full: false })
 
     // After a reset the server downgrades this connection.
     vi.advanceTimersByTime(1000)
     lastSocket().open()
-    lastSocket().receive(new Uint8Array([4, 0, 1]))
-    expect(client.getAccess()).toEqual({ role: 'viewer', generation: 1 })
+    lastSocket().receive(new Uint8Array([4, 0, 1, 0]))
+    expect(client.getAccess()).toEqual({ role: 'viewer', generation: 1, full: false })
+
+    // The board fills up: same role, but flagged full.
+    lastSocket().receive(new Uint8Array([4, 0, 1, 1]))
+    expect(client.getAccess()).toEqual({ role: 'viewer', generation: 1, full: true })
   })
 
   it('asks the server to reset the edit link', () => {
