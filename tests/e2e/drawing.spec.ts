@@ -88,3 +88,65 @@ test('an arrow follows the shapes it connects when someone else moves them', asy
     expect(await arrow(page)).toMatchObject({ attached: true })
   }
 })
+
+test('a drag sends far fewer messages than mouse moves, and lands in the same place', async ({
+  browser,
+}) => {
+  const { edit: url } = await newBoard()
+  // Count board edits (message type 0) that Alice sends. The listener has to
+  // be in place before her page opens its connection.
+  let sent = 0
+  let counting = false
+  const alice = await (await browser.newContext()).newPage()
+  alice.on('websocket', (ws) =>
+    ws.on('framesent', ({ payload }) => {
+      if (counting && typeof payload !== 'string' && payload[0] === 0) sent++
+    }),
+  )
+  await alice.goto(url)
+  await expect(alice.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
+  const bob = await openBoard(browser, url)
+  await alice.getByRole('button', { name: 'Rectangle' }).click()
+  await alice.mouse.click(300, 300)
+  await expect
+    .poll(async () => (await bob.evaluate(() => window.editor!.store.list())).length)
+    .toBe(1)
+
+  // Playwright's own mouse is slower than a real one, so drive the canvas
+  // directly: 120 moves at 60 a second, like a real mouse.
+  await alice.waitForTimeout(300)
+  counting = true
+  await alice.evaluate(async () => {
+    const canvas = document.querySelector('canvas')!
+    const fire = (type: string, x: number, y: number) =>
+      canvas.dispatchEvent(
+        // React listens at the root, so the events must bubble.
+        new PointerEvent(type, {
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: 1,
+          pointerId: 1,
+          bubbles: true,
+        }),
+      )
+    fire('pointerdown', 300, 300)
+    for (let i = 1; i <= 120; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 16))
+      fire('pointermove', 300 + i * 3, 300 + i)
+    }
+    fire('pointerup', 660, 420)
+  })
+  await alice.waitForTimeout(300)
+  counting = false
+
+  // About one message per 50 ms instead of one per move.
+  expect(sent).toBeGreaterThan(10)
+  expect(sent).toBeLessThan(60)
+  const position = (page: Page) =>
+    page.evaluate(() => {
+      const { x, y } = window.editor!.store.list()[0]!
+      return { x, y }
+    })
+  await expect.poll(() => position(bob)).toEqual(await position(alice))
+})

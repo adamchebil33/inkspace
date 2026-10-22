@@ -7,7 +7,7 @@ import {
   removeAwarenessStates,
 } from 'y-protocols/awareness'
 import * as syncProtocol from 'y-protocols/sync'
-import type * as Y from 'yjs'
+import * as Y from 'yjs'
 import type { Role } from '../../shared/boardKey'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
@@ -33,6 +33,13 @@ export interface Access {
 /** Flag in the access message: the board is full. */
 const BOARD_FULL = 1
 
+/**
+ * Local edits are sent at most this often, merged into one message. A drag
+ * changes the document on every mouse move (60 or more a second); this sends
+ * it at the same rate as the cursor, so the two arrive together, with a third
+ * of the messages. The local document is not delayed at all.
+ */
+export const UPDATE_INTERVAL_MS = 50
 const PING_INTERVAL_MS = 20_000
 /** No message of any kind for this long means the connection is dead. */
 const SILENCE_TIMEOUT_MS = 45_000
@@ -68,6 +75,9 @@ export class SyncClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private readonly listeners = new Set<() => void>()
   private synced = false
+  /** Local edits waiting for the next send. */
+  private outgoing: Uint8Array[] = []
+  private updateTimer: ReturnType<typeof setTimeout> | null = null
   private access: Access | null = null
   private readonly syncedCallbacks: (() => void)[] = []
 
@@ -94,6 +104,8 @@ export class SyncClient {
   }
 
   disconnect(): void {
+    // Whatever is still queued goes out before the socket closes.
+    this.sendOutgoing()
     this.shouldConnect = false
     this.clearReconnect()
     this.ws?.close()
@@ -101,6 +113,8 @@ export class SyncClient {
 
   destroy(): void {
     this.disconnect()
+    if (this.updateTimer) clearTimeout(this.updateTimer)
+    this.updateTimer = null
     this.doc.off('update', this.handleDocUpdate)
     this.awareness.off('update', this.handleAwarenessUpdate)
     this.awareness.destroy()
@@ -231,7 +245,9 @@ export class SyncClient {
   }
 
   private handlePageHide = (): void => {
-    // Leaving: remove our cursor right away instead of waiting for a timeout.
+    // Leaving: send any queued edits now, and remove our cursor right away
+    // instead of waiting for a timeout.
+    this.sendOutgoing()
     this.awareness.setLocalState(null)
   }
 
@@ -274,6 +290,29 @@ export class SyncClient {
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
     if (origin === this) return // It came from the server; don't send it back.
+    this.outgoing.push(update)
+    this.scheduleSend()
+  }
+
+  /**
+   * Throttle: the first edit goes out at once, then at most one message per
+   * interval carries everything that changed in it.
+   */
+  private scheduleSend(): void {
+    if (this.updateTimer) return
+    this.sendOutgoing()
+    this.updateTimer = setTimeout(() => {
+      this.updateTimer = null
+      if (this.outgoing.length > 0) this.scheduleSend()
+    }, UPDATE_INTERVAL_MS)
+  }
+
+  private sendOutgoing(): void {
+    if (this.outgoing.length === 0) return
+    const update = this.outgoing.length === 1 ? this.outgoing[0]! : Y.mergeUpdates(this.outgoing)
+    this.outgoing = []
+    // If the socket is not open the edit is simply not sent now. It is in
+    // the document, and the sync exchange on reconnect will carry it.
     const encoder = encoding.createEncoder()
     encoding.writeVarUint(encoder, MESSAGE_SYNC)
     syncProtocol.writeUpdate(encoder, update)

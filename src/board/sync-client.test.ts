@@ -3,7 +3,7 @@ import * as encoding from 'lib0/encoding'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
-import { SyncClient } from './sync-client'
+import { SyncClient, UPDATE_INTERVAL_MS } from './sync-client'
 
 /** Stands in for the browser WebSocket and records what the client sends. */
 class FakeSocket {
@@ -94,6 +94,7 @@ describe('SyncClient', () => {
 
     doc.getMap('shapes').set('local', 1)
     expect(socket.sentTypes()).toEqual([SYNC])
+    vi.advanceTimersByTime(UPDATE_INTERVAL_MS)
 
     const remote = new Y.Doc()
     remote.getMap('shapes').set('remote', 2)
@@ -102,6 +103,47 @@ describe('SyncClient', () => {
 
     expect(doc.getMap('shapes').get('remote')).toBe(2)
     expect(socket.sent).toEqual([])
+  })
+
+  it('sends a burst of edits as one message per interval, without losing any', () => {
+    const { doc, client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    socket.sent = []
+
+    // A drag: a hundred position changes within one interval.
+    const shapes = doc.getMap('shapes')
+    for (let x = 1; x <= 100; x++) shapes.set('x', x)
+    // The first goes out at once; the rest wait for the interval.
+    expect(socket.sentTypes()).toEqual([SYNC])
+    vi.advanceTimersByTime(UPDATE_INTERVAL_MS)
+    expect(socket.sentTypes()).toEqual([SYNC, SYNC])
+    // Nothing more to send: no further messages.
+    vi.advanceTimersByTime(UPDATE_INTERVAL_MS * 5)
+    expect(socket.sentTypes()).toEqual([SYNC, SYNC])
+
+    // Applying what was sent gives the receiver the final state.
+    const server = new Y.Doc()
+    for (const message of socket.sent as Uint8Array[]) {
+      const decoder = decoding.createDecoder(message)
+      decoding.readVarUint(decoder)
+      syncProtocol.readSyncMessage(decoder, encoding.createEncoder(), server, null)
+    }
+    expect(server.getMap('shapes').get('x')).toBe(100)
+  })
+
+  it('sends queued edits straight away when disconnecting', () => {
+    const { doc, client } = makeClient()
+    client.connect()
+    const socket = lastSocket()
+    socket.open()
+    doc.getMap('shapes').set('a', 1)
+    socket.sent = []
+    doc.getMap('shapes').set('a', 2)
+    expect(socket.sent).toEqual([])
+    client.disconnect()
+    expect(socket.sentTypes()).toEqual([SYNC])
   })
 
   it('answers the server asking what it is missing', () => {

@@ -142,7 +142,8 @@ panel is affected.
 
 Everything runs on Cloudflare's free plan with no credit card: one Worker serves the
 frontend, the API and the Durable Objects. The free plan's daily limits shaped the
-design: cursor updates are throttled to 20 a second, saves are batched, idle boards
+design: cursor updates and outgoing edits are each throttled to 20 a second (a fast drag
+sends a third of the messages it used to), saves are batched, idle boards
 hibernate, and each board is capped in size.
 
 ## Tech stack
