@@ -32,6 +32,8 @@ offline merge when the connection returns, and undo only reverts your own change
   watch, and the server enforces the difference. The board's creator can reset the edit link
   at any time, which cuts off everyone using the old one. Still no sign-up.
 - **Saved automatically.** Boards are still there days later.
+- **Size limits.** Each board is capped in size, enforced by the server, so one board cannot
+  use up the free plan.
 - **AI summary (optional).** One button turns the notes into a summary, themes and action
   items, and can drop the action items onto the board as new sticky notes.
 - **PNG export** of the whole board.
@@ -60,9 +62,9 @@ The interesting parts, with pointers into the code:
 
 The board is a [Yjs](https://yjs.dev) document. Each shape is its own map inside it, so
 edits to different properties of one shape merge instead of overwriting each other: one
-person moves a note while another recolours it, and both changes survive. A note's text
-is a shared text type, so two people typing in it are merged character by character. Because merging
-is built into the data structure, being offline needs no special code. Edits apply
+person moves a note while another recolours it, and both changes survive. A note's text is
+a shared text type, so two people typing in it are merged character by character. Because
+merging is built into the data structure, being offline needs no special code. Edits apply
 locally, and on reconnect the two sides exchange whatever the other is missing.
 ([`src/board/store.ts`](src/board/store.ts))
 
@@ -83,7 +85,9 @@ Each board is one Cloudflare Durable Object holding the document and its WebSock
 
 [`src/board/sync-client.ts`](src/board/sync-client.ts) speaks the Yjs sync protocol over
 one WebSocket, reconnects with exponential backoff and jitter, and keeps the connection
-alive with a ping the server answers without waking the board. It replaced an off-the-shelf
+alive with a ping the server answers without waking the board. Local edits go out at most
+every 50 ms, merged into one message, so a fast drag sends a third of the messages while
+your own screen still updates on every move. It replaced an off-the-shelf
 client that re-broadcast every presence update it received, multiplying traffic.
 
 ### Arrows that follow shapes, with nothing extra to sync
@@ -106,7 +110,9 @@ and the renderer draws from that state onto a Canvas 2D context
 
 Pen strokes are streamed to other people while they are being drawn, over the same
 short-lived presence channel as cursors, then simplified and saved to the document once
-on release.
+on release. Follow mode uses the same channel: a person's view is shared only while someone
+is following them ([`src/board/follow.ts`](src/board/follow.ts)). Snapping is pure
+rectangle maths with its own tests ([`src/board/snapping.ts`](src/board/snapping.ts)).
 
 ### Share links, and revoking them, without accounts
 
@@ -184,9 +190,11 @@ npm run lint
 The first time, install the test browser with `npx playwright install chromium`.
 
 The browser tests open the same board in separate browser contexts and check, among other
-things, that a change in one window shows up in the other, that offline edits merge after
-reconnecting, that undo only reverts your own changes, that the server refuses writes from
-a view-only link, and that resetting the edit link cuts off people using the old one.
+things, that a change in one window shows up in the other, that two people typing in one
+note keep both their words, that offline edits merge after reconnecting, that undo only
+reverts your own changes, that the server refuses writes from a view-only link or a reset
+edit link, that a full board turns read-only, and that a fast drag sends far fewer messages
+than mouse moves.
 
 ## Deploy
 
@@ -229,7 +237,8 @@ deploys.
 ## Project structure
 
 ```
-src/board/        Editor, store, renderer, geometry, presence, sync client (no React)
+src/board/        Editor, store, renderer, geometry, snapping, presence, follow mode,
+                  templates, sync client (no React)
 src/components/   React components: canvas, toolbar, panels
 src/pages/        Home page and board page
 src/lib/          Routing, theme, identity, recent boards
@@ -242,4 +251,5 @@ tests/e2e/        Playwright tests
 
 - The owner link cannot be revoked, so whoever has it controls the board. Keep it private.
 - The list of recent boards lives in the browser, not in an account.
+- The board title is last-writer-wins: if two people rename the board at once, one name is kept.
 - Each board is capped at 2 MB of data. A board that reaches it becomes read-only.
