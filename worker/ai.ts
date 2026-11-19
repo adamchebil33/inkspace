@@ -1,6 +1,6 @@
 import { parseSummary, type SummaryResponse } from '../shared/summary'
 
-export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+export const DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 const TIMEOUT_MS = 20_000
 
