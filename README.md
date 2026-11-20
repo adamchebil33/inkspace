@@ -2,7 +2,7 @@
 
 **A multiplayer whiteboard: share a link and everyone edits the same board live.**
 
-**Live demo:** _add your URL here after the first deploy_ (open it in two windows to see live sync)
+**Live demo:** https://inkspace.adamchebil.workers.dev (open it in two windows to see live sync)
 
 ![Two people editing the same board in two browser windows](docs/demo.gif)
 
@@ -196,11 +196,13 @@ reverts your own changes, that the server refuses writes from a view-only link o
 edit link, that a full board turns read-only, and that a fast drag sends far fewer messages
 than mouse moves.
 
+The workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all checks and
+browser tests on every push and pull request.
+
 ## Deploy
 
-Deployment is free and needs no credit card.
-
-### First deploy, from your machine
+Inkspace is deployed on Cloudflare Workers, on the free plan with no credit card. To deploy
+your own copy:
 
 1. Create a free Cloudflare account at https://dash.cloudflare.com/sign-up.
 2. Log in and deploy:
@@ -218,21 +220,6 @@ Deployment is free and needs no credit card.
    ```bash
    npx wrangler secret put GEMINI_API_KEY
    ```
-
-### Automatic deploys from GitHub
-
-The workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all tests on
-every push and pull request, and deploys pushes to `main` once the tests pass. Add two
-repository secrets under **Settings → Secrets and variables → Actions**:
-
-| Secret                  | Where to get it                                                                                    |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | Cloudflare dashboard → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template |
-| `CLOUDFLARE_ACCOUNT_ID` | `npx wrangler whoami`, or the Workers overview page in the dashboard                               |
-
-Until both exist, the deploy job passes without deploying. The Gemini key is not a GitHub
-secret: it is stored in Cloudflare by the `wrangler secret put` command above and survives
-deploys.
 
 ## Project structure
 
