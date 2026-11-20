@@ -76,7 +76,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
               <h3>{group.title}</h3>
               <dl>
                 {group.rows.map(([keys, action]) => (
-                  <div key={action}>
+                  <div key={`${keys.join('+')} ${action}`}>
                     <dt>
                       {keys.map((key) => (
                         <kbd key={key}>{key}</kbd>
