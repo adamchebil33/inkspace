@@ -240,3 +240,7 @@ tests/e2e/        Playwright tests
 - The list of recent boards lives in the browser, not in an account.
 - The board title is last-writer-wins: if two people rename the board at once, one name is kept.
 - Each board is capped at 2 MB of data. A board that reaches it becomes read-only.
+
+## License
+
+[MIT](LICENSE)
