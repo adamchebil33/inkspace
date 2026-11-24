@@ -1,7 +1,19 @@
 import * as Y from 'yjs'
 import { arrowEnds, arrowFromEnds, boundaryPoint, rectCenter } from './geometry'
 import { diffText } from './text'
-import { COLORS, SHAPE_TYPES, type ColorName, type Shape, type ShapeType } from './types'
+import {
+  COLORS,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
+  SHAPE_TYPES,
+  TEXT_ALIGNS,
+  hasText,
+  isBoxType,
+  type ColorName,
+  type Shape,
+  type ShapeType,
+  type TextAlign,
+} from './types'
 
 export type ShapePatch = Partial<Omit<Shape, 'id' | 'type' | 'points' | 'startId' | 'endId'>> & {
   /** `null` detaches that end of an arrow. */
@@ -86,7 +98,26 @@ export function parseShape(id: string, map: Y.Map<unknown>): Shape | null {
     if (typeof startId === 'string') shape.startId = startId
     if (typeof endId === 'string') shape.endId = endId
   }
+  if (hasText(shape.type)) readFormat(shape, map)
   return shape
+}
+
+/** A shape's text formatting. Unknown values are ignored: the default is used instead. */
+function readFormat(shape: Shape, map: Y.Map<unknown>): void {
+  const fontSize = map.get('fontSize')
+  const align = map.get('align')
+  if (
+    isBoxType(shape.type) &&
+    isNumber(fontSize) &&
+    fontSize >= MIN_FONT_SIZE &&
+    fontSize <= MAX_FONT_SIZE
+  ) {
+    shape.fontSize = fontSize
+  }
+  if (TEXT_ALIGNS.includes(align as TextAlign)) shape.align = align as TextAlign
+  if (map.get('bold') === true) shape.bold = true
+  if (map.get('italic') === true) shape.italic = true
+  if (map.get('strike') === true) shape.strike = true
 }
 
 /**

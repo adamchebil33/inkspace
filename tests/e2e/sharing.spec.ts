@@ -62,7 +62,7 @@ test('creating a board from the home page and finding it again', async ({ browse
   const page = await context.newPage()
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText())
   await page.goto('/')
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('whiteboard')
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Draw together')
   await expect(page.getByRole('heading', { name: 'Your recent boards' })).toHaveCount(0)
 
   // The creator's address carries no secret, so it is safe to pass around.

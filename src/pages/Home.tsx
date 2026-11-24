@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { boardIdForOwner, newOwnerKey } from '../../shared/boardKey'
 import { TEMPLATES, type TemplateId } from '../board/templates'
-import { Logo } from '../components/icons'
+import { ArrowRightIcon, CloseIcon, ExternalIcon, Logo } from '../components/icons'
+import { HeroDemo } from '../components/HeroDemo'
 import { TemplatePreview } from '../components/TemplatePreview'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { MAX_NAME_LENGTH, cleanName, initials, loadUser, saveUser } from '../lib/identity'
 import { forgetBoard, loadRecentBoards, rememberBoard, timeAgo } from '../lib/recentBoards'
 import { boardPath, navigate } from '../lib/router'
+import './Home.css'
 
 const REPO_URL = 'https://github.com/adamchebil33/inkspace'
 
@@ -39,48 +41,84 @@ export function Home() {
 
   return (
     <div className="home">
-      <main className="home-main">
-        <div className="wordmark">
-          <Logo size={36} />
-          <span>Inkspace</span>
-          <ThemeToggle />
-        </div>
-
-        <h1>A whiteboard for thinking together.</h1>
-        <p className="lede">
-          Sticky notes, shapes, arrows and a pen on an endless canvas. Share the link and everyone
-          edits live. No sign-up.
-        </p>
-
-        <form
-          className="home-cta"
-          onSubmit={(e) => {
+      <header className="home-header">
+        <a
+          href="/"
+          className="home-brand"
+          onClick={(e) => {
             e.preventDefault()
-            void createBoard()
+            navigate('/')
           }}
         >
-          <label className="name-field">
-            <span className="avatar" style={{ background: user.color }} aria-hidden="true">
-              {initials(name)}
-            </span>
-            <span className="name-label">Your name</span>
-            <input
-              className="name-input"
-              maxLength={MAX_NAME_LENGTH}
-              value={name}
-              onChange={(e) => rename(e.target.value)}
-              // Left empty: fall back to the name we had.
-              onBlur={() => setName(loadUser().name)}
-            />
-          </label>
-          <button type="submit" className="primary">
-            New board
-          </button>
-          <span className="hint">Tip: open your board in two windows to watch them sync.</span>
-        </form>
+          <Logo size={30} />
+          <span>Inkspace</span>
+        </a>
+        <nav className="home-nav" aria-label="Site">
+          <a href={REPO_URL} className="home-nav-link" target="_blank" rel="noreferrer">
+            Source code
+            <ExternalIcon />
+          </a>
+          <ThemeToggle />
+        </nav>
+      </header>
 
-        <section aria-labelledby="templates-heading">
-          <h2 id="templates-heading">Or start from a template</h2>
+      <main className="home-main">
+        <section className="hero" aria-labelledby="hero-heading">
+          <div className="hero-copy">
+            <h1 id="hero-heading">
+              Send a link.
+              <br />
+              Draw <span className="marker">together.</span>
+            </h1>
+            <p className="lede">
+              A whiteboard that lives at a web address. Sticky notes, shapes, arrows and a pen, with
+              everyone's cursors and edits showing up as they happen. No account, nothing to
+              install.
+            </p>
+
+            <form
+              className="start"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void createBoard()
+              }}
+            >
+              <label className="name-field">
+                <span className="avatar" style={{ background: user.color }} aria-hidden="true">
+                  {initials(name)}
+                </span>
+                <span className="name-label">Your name</span>
+                <input
+                  className="name-input"
+                  maxLength={MAX_NAME_LENGTH}
+                  value={name}
+                  onChange={(e) => rename(e.target.value)}
+                  // Left empty: fall back to the name we had.
+                  onBlur={() => setName(loadUser().name)}
+                />
+              </label>
+              <button type="submit" className="primary">
+                New board
+                <ArrowRightIcon />
+              </button>
+            </form>
+            <p className="start-note">
+              This is the name others will see. Tip: open your board in two windows to watch them
+              sync.
+            </p>
+          </div>
+
+          <figure className="hero-demo">
+            <HeroDemo />
+            <figcaption>Ada and Grace on one board, drawn by the app's own renderer.</figcaption>
+          </figure>
+        </section>
+
+        <section className="home-section" aria-labelledby="templates-heading">
+          <div className="section-head">
+            <h2 id="templates-heading">Start from a template</h2>
+            <p>Opens a new board with this already on it.</p>
+          </div>
           <ul className="template-list">
             {TEMPLATES.map((template) => (
               <li key={template.id}>
@@ -99,26 +137,26 @@ export function Home() {
           </ul>
         </section>
 
-        <Preview />
-
         {boards.length > 0 && (
-          <section aria-labelledby="recent-heading">
-            <h2 id="recent-heading">Your recent boards</h2>
+          <section className="home-section" aria-labelledby="recent-heading">
+            <div className="section-head">
+              <h2 id="recent-heading">Your recent boards</h2>
+              <p>Kept in this browser. Removing one here doesn't delete the board.</p>
+            </div>
             <ul className="board-list">
               {boards.map((board) => (
                 <li key={board.id}>
                   <a
                     href={boardPath(board.id)}
-                    className="board-card"
+                    className="board-row"
                     onClick={(e) => {
                       e.preventDefault()
                       navigate(boardPath(board.id))
                     }}
                   >
                     <strong>{board.title || 'Untitled board'}</strong>
-                    <small>
-                      {ROLE_LABEL[board.role]} · opened {timeAgo(board.openedAt)}
-                    </small>
+                    <span className={`role role-${board.role}`}>{ROLE_LABEL[board.role]}</span>
+                    <small>Opened {timeAgo(board.openedAt)}</small>
                   </a>
                   <button
                     type="button"
@@ -130,98 +168,21 @@ export function Home() {
                       setBoards(loadRecentBoards())
                     }}
                   >
-                    ×
+                    <CloseIcon />
                   </button>
                 </li>
               ))}
             </ul>
-            <p className="hint">
-              This list lives in your browser. Removing a board here doesn't delete it.
-            </p>
           </section>
         )}
       </main>
 
       <footer className="home-footer">
-        Built with React, Yjs and Cloudflare Durable Objects ·{' '}
+        <span>Built with React, Yjs and Cloudflare Durable Objects.</span>
         <a href={REPO_URL} target="_blank" rel="noreferrer">
           Source on GitHub
         </a>
       </footer>
     </div>
-  )
-}
-
-/** A small static picture of a board in use, so the page isn't just words. */
-function Preview() {
-  return (
-    <svg
-      className="preview"
-      viewBox="0 0 640 260"
-      role="img"
-      aria-label="Two people editing a board"
-    >
-      <rect width="640" height="260" rx="14" fill="var(--panel)" stroke="var(--panel-border)" />
-      <g fontFamily="inherit" fontSize="13" fill="#1c1c1a" textAnchor="middle">
-        <rect x="60" y="56" width="130" height="130" rx="3" fill="#ffe066" />
-        <text x="125" y="118">
-          Interview
-        </text>
-        <text x="125" y="136">
-          five users
-        </text>
-        <rect
-          x="255"
-          y="76"
-          width="150"
-          height="90"
-          rx="8"
-          fill="#a5d8ff"
-          stroke="#1c7ed6"
-          strokeWidth="2"
-        />
-        <text x="330" y="126">
-          Prototype
-        </text>
-        <rect x="470" y="56" width="130" height="130" rx="3" fill="#fcc2d7" />
-        <text x="535" y="118">
-          Ship it
-        </text>
-        <text x="535" y="136">
-          on Friday
-        </text>
-      </g>
-      <g stroke="var(--fg)" strokeWidth="2.5" strokeLinecap="round" fill="none">
-        <path d="M198 121h48m-10-8 10 8-10 8" />
-        <path d="M413 121h48m-10-8 10 8-10 8" />
-      </g>
-      <path
-        d="M250 215c20-22 40-22 60 0s40 22 60 0"
-        fill="none"
-        stroke="#e03131"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-      />
-      <Cursor x={372} y={196} color="#d6336c" name="Ada" />
-      <Cursor x={560} y={150} color="#2f9e44" name="Grace" />
-    </svg>
-  )
-}
-
-function Cursor({ x, y, color, name }: { x: number; y: number; color: string; name: string }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <path
-        d="M0 0v17l4.6-4.4h6.9z"
-        fill={color}
-        stroke="#fff"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <rect x="12" y="16" width={name.length * 7.5 + 12} height="20" rx="6" fill={color} />
-      <text x="18" y="30" fontSize="12" fontWeight="500" fill="#fff">
-        {name}
-      </text>
-    </g>
   )
 }

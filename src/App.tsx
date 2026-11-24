@@ -9,10 +9,10 @@ export function App() {
   if (route.page === 'board') return <BoardPage boardId={route.boardId} linkKey={route.key} />
   return (
     <div className="home">
-      <main className="home-main">
+      <main className="home-main not-found">
         <h1>Page not found</h1>
         <p className="lede">That link doesn't point to a board.</p>
-        <div className="home-cta">
+        <div>
           <button type="button" className="primary" onClick={() => navigate('/')}>
             Go to the home page
           </button>

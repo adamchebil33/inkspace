@@ -11,7 +11,17 @@ import {
 } from './geometry'
 import type { Draft, Peer } from './presence'
 import type { Guide } from './snapping'
-import { FONT, FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, textScale, textWidth, wrapText } from './text'
+import {
+  FONT_FAMILY,
+  FONT_SIZE,
+  LINE_HEIGHT,
+  boxTextScale,
+  fontFor,
+  textAlignOf,
+  textScale,
+  textWidth,
+  wrapText,
+} from './text'
 import { PALETTE, SHAPE_TEXT_COLOR, inkColor, type Theme } from './theme'
 import type { Shape } from './types'
 
@@ -216,32 +226,65 @@ function drawBoxText(ctx: CanvasRenderingContext2D, shape: Shape) {
   ctx.rect(shape.x, shape.y, shape.w, shape.h)
   ctx.clip()
 
-  ctx.font = FONT
+  const scale = boxTextScale(shape)
+  ctx.font = fontFor(shape, FONT_SIZE * scale)
   ctx.fillStyle = SHAPE_TEXT_COLOR
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-
-  const lines = wrapText(shape.text, textWidth(shape), (s) => ctx.measureText(s).width)
-  const centerX = shape.x + shape.w / 2
-  let y = shape.y + shape.h / 2 - ((lines.length - 1) * LINE_HEIGHT) / 2
-  for (const line of lines) {
-    ctx.fillText(line, centerX, y)
-    y += LINE_HEIGHT
-  }
+  const width = textWidth(shape)
+  const lines = wrapText(shape.text, width, (s) => ctx.measureText(s).width)
+  const lineHeight = LINE_HEIGHT * scale
+  const left = shape.x + (shape.w - width) / 2
+  drawLines(ctx, shape, lines, {
+    left,
+    width,
+    top: shape.y + shape.h / 2 - (lines.length * lineHeight) / 2,
+    lineHeight,
+    fontSize: FONT_SIZE * scale,
+  })
   ctx.restore()
+}
+
+/**
+ * Draw lines of text in the shape's alignment within a column, and strike
+ * them through if the shape says so. `ctx.font` and the colour are already set.
+ */
+function drawLines(
+  ctx: CanvasRenderingContext2D,
+  shape: Shape,
+  lines: readonly string[],
+  column: { left: number; width: number; top: number; lineHeight: number; fontSize: number },
+) {
+  const align = textAlignOf(shape)
+  const x =
+    align === 'left'
+      ? column.left
+      : align === 'right'
+        ? column.left + column.width
+        : column.left + column.width / 2
+  ctx.textAlign = align
+  ctx.textBaseline = 'middle'
+  lines.forEach((line, i) => {
+    const y = column.top + (i + 0.5) * column.lineHeight
+    ctx.fillText(line, x, y)
+    if (!shape.strike || !line) return
+    const lineWidth = ctx.measureText(line).width
+    const start = align === 'left' ? x : align === 'right' ? x - lineWidth : x - lineWidth / 2
+    const thickness = Math.max(1, column.fontSize / 14)
+    ctx.fillRect(start, y - thickness / 2, lineWidth, thickness)
+  })
 }
 
 // ---- Free text ----
 
 function drawFreeText(ctx: CanvasRenderingContext2D, shape: Shape, theme: Theme) {
   const scale = textScale(shape)
-  ctx.font = `${FONT_SIZE * scale}px ${FONT_FAMILY}`
+  ctx.font = fontFor(shape, FONT_SIZE * scale)
   ctx.fillStyle = inkColor(shape.color, theme)
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
-  const lineHeight = LINE_HEIGHT * scale
-  shape.text.split('\n').forEach((line, i) => {
-    ctx.fillText(line, shape.x, shape.y + (i + 0.5) * lineHeight)
+  drawLines(ctx, shape, shape.text.split('\n'), {
+    left: shape.x,
+    width: shape.w,
+    top: shape.y,
+    lineHeight: LINE_HEIGHT * scale,
+    fontSize: FONT_SIZE * scale,
   })
 }
 

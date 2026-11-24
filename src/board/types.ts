@@ -21,6 +21,17 @@ export const COLORS = [
 
 export type ColorName = (typeof COLORS)[number]
 
+/** Text sizes, in board units (the same as pixels at 100% zoom). */
+export const MIN_FONT_SIZE = 8
+export const MAX_FONT_SIZE = 200
+
+export const TEXT_ALIGNS = ['left', 'center', 'right'] as const
+
+export type TextAlign = (typeof TEXT_ALIGNS)[number]
+
+/** Shapes that hold text, and so can be formatted. */
+export const hasText = (type: ShapeType): boolean => type === 'text' || isBoxType(type)
+
 /**
  * Every shape has a bounding box (x, y, w, h), which is all that moving,
  * marquee selection and culling need. Type-specific data sits on top:
@@ -31,6 +42,10 @@ export type ColorName = (typeof COLORS)[number]
  *          which corner it starts from. Either end can be attached to
  *          another shape (`startId`/`endId`).
  * - text:  the box is exactly the text block, and the font scales with it.
+ *
+ * Shapes that hold text (boxes and text) can also be formatted. Formatting
+ * applies to the shape's whole text, and each property is stored separately,
+ * so one person making a note bold while another types in it keeps both.
  */
 export interface Shape {
   id: string
@@ -55,6 +70,16 @@ export interface Shape {
    */
   startId?: string
   endId?: string
+  /**
+   * Box shapes only: text size in board units, 16 when absent. (A text
+   * shape's size is the scale of its box instead.)
+   */
+  fontSize?: number
+  bold?: boolean
+  italic?: boolean
+  strike?: boolean
+  /** Centred in boxes and left-aligned in text shapes when absent. */
+  align?: TextAlign
 }
 
 export type Tool = 'select' | 'hand' | ShapeType

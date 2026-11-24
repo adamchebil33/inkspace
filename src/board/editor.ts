@@ -22,13 +22,25 @@ import type { Draft } from './presence'
 import { snapMove, snapPoint, snapResize, type Guide } from './snapping'
 import { HANDLE_SIZE, type RenderState } from './render'
 import type { BoardStore, ShapePatch } from './store'
-import { FONT_SIZE, LINE_HEIGHT, textBlockSize, textScale } from './text'
 import {
+  FONT_SIZE,
+  clampFontSize,
+  fontSizeOf,
+  LINE_HEIGHT,
+  textAlignOf,
+  textBlockSize,
+  textScale,
+  type FontStyle,
+  type Measure,
+} from './text'
+import {
+  hasText,
   isBoxType,
   type BoxType,
   type ColorName,
   type Shape,
   type ShapeType,
+  type TextAlign,
   type Tool,
 } from './types'
 
@@ -77,8 +89,28 @@ export interface EditorState {
 
 export interface EditorOptions {
   /** Width of a string at the base font size. Injected so tests need no DOM. */
-  measureText?: (text: string) => number
+  measureText?: Measure
 }
+
+/** The formatting of the selected shapes that hold text, as the format panel shows it. */
+export interface TextFormat {
+  /** Text size in board units; null when the shapes differ. */
+  fontSize: number | null
+  /** Each is true only if it is on for every one of the shapes. */
+  bold: boolean
+  italic: boolean
+  strike: boolean
+  /** Null when the shapes differ. */
+  align: TextAlign | null
+}
+
+export type TextFormatPatch = Partial<{
+  fontSize: number
+  bold: boolean
+  italic: boolean
+  strike: boolean
+  align: TextAlign
+}>
 
 type Interaction =
   | { kind: 'idle' }
@@ -197,14 +229,15 @@ export class Editor {
   private docVersion = 0
 
   private state: EditorState
-  private readonly measureText: (text: string) => number
+  private readonly measureText: Measure
   private readonly listeners = new Set<() => void>()
   private readonly navigateListeners = new Set<() => void>()
   private readonly unsubscribeStore: () => void
 
   constructor(store: BoardStore, options: EditorOptions = {}) {
     this.store = store
-    this.measureText = options.measureText ?? ((text) => text.length * FONT_SIZE * 0.5)
+    this.measureText =
+      options.measureText ?? ((text, style) => text.length * FONT_SIZE * (style?.bold ? 0.55 : 0.5))
     if (store.readOnly) this.tool = 'hand'
     this.state = this.buildState()
     this.unsubscribeStore = store.subscribe(() => {
@@ -394,6 +427,92 @@ export class Editor {
     this.emit()
   }
 
+  /**
+   * Delete every shape on the board, for everyone. It is one undo step, so
+   * this person can bring the whole board back, other people's shapes too.
+   */
+  clearBoard(): void {
+    if (this.store.readOnly) return
+    const ids = this.store.list().map((s) => s.id)
+    this.endEditing()
+    this.interaction = { kind: 'idle' }
+    this.selection = []
+    if (ids.length > 0) {
+      this.store.commit()
+      this.store.remove(ids)
+      this.store.commit()
+    }
+    this.emit()
+  }
+
+  // ---- Text formatting ----
+
+  /**
+   * Selected shapes with text to format: ones that have some, and the one
+   * being typed into. A shape just drawn, with no text, has nothing to format.
+   */
+  private textTargets(): Shape[] {
+    if (isShapeTool(this.tool)) return []
+    return this.selection
+      .map((id) => this.store.get(id))
+      .filter(
+        (shape): shape is Shape =>
+          shape !== undefined &&
+          hasText(shape.type) &&
+          (shape.text.trim() !== '' || shape.id === this.editingId),
+      )
+  }
+
+  /** The selection's text formatting, or null when there is no text to format. */
+  getTextFormat(): TextFormat | null {
+    const shapes = this.textTargets()
+    if (shapes.length === 0) return null
+    const only = <T>(values: T[]): T | null => (new Set(values).size === 1 ? values[0]! : null)
+    return {
+      fontSize: only(shapes.map(fontSizeOf)),
+      bold: shapes.every((s) => s.bold === true),
+      italic: shapes.every((s) => s.italic === true),
+      strike: shapes.every((s) => s.strike === true),
+      align: only(shapes.map(textAlignOf)),
+    }
+  }
+
+  /** Format the text of every selected shape that holds text, as one undo step. */
+  setTextFormat(patch: TextFormatPatch): void {
+    const shapes = this.textTargets()
+    if (shapes.length === 0 || this.store.readOnly) return
+    this.store.commit()
+    this.store.transact(() => {
+      for (const shape of shapes) {
+        const { fontSize: requested, ...rest } = patch
+        const fontSize = requested === undefined ? undefined : clampFontSize(requested)
+        const update: ShapePatch = { ...rest }
+        if (shape.type === 'text') {
+          // A text shape's box is its text, so a size or weight change resizes it.
+          const style: FontStyle = {
+            bold: patch.bold ?? shape.bold,
+            italic: patch.italic ?? shape.italic,
+          }
+          const scale = fontSize ? fontSize / FONT_SIZE : textScale(shape)
+          const size = textBlockSize(shape.text, (s) => this.measureText(s, style))
+          update.w = size.w * scale
+          update.h = size.h * scale
+        } else if (fontSize) {
+          update.fontSize = fontSize
+        }
+        this.store.update(shape.id, update)
+      }
+    })
+    this.store.commit()
+    this.emit()
+  }
+
+  /** Bold, italic or strikethrough: on for all the selection, or off if it already was. */
+  toggleTextFormat(key: 'bold' | 'italic' | 'strike'): void {
+    const format = this.getTextFormat()
+    if (format) this.setTextFormat({ [key]: !format[key] })
+  }
+
   nudgeSelection(dx: number, dy: number): void {
     const moving = new Set(this.selection)
     this.store.transact(() => {
@@ -514,7 +633,7 @@ export class Editor {
     }
     // A text shape's box is exactly its text, at whatever scale it has.
     const scale = textScale(shape)
-    const size = textBlockSize(text, this.measureText)
+    const size = textBlockSize(text, (s) => this.measureText(s, shape))
     this.store.update(id, { text, w: size.w * scale, h: size.h * scale })
   }
 

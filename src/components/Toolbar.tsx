@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Editor, EditorState } from '../board/editor'
 import { PALETTE } from '../board/theme'
 import { COLORS, type ColorName, type Tool } from '../board/types'
+import { FormatPanel } from './FormatPanel'
 import {
   ArrowIcon,
   EllipseIcon,
@@ -57,6 +58,7 @@ export function Toolbar({ editor, state }: Props) {
   return (
     // preventDefault keeps keyboard focus (and any open text editor) where it is.
     <div className="dock" onMouseDown={(e) => e.preventDefault()}>
+      <FormatPanel editor={editor} />
       {showColors && (
         <div className="panel colors" role="group" aria-label="Colour">
           {COLORS.map((color) => (

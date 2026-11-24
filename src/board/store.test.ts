@@ -75,6 +75,57 @@ describe('BoardStore', () => {
   })
 })
 
+describe('text formatting', () => {
+  it('reads valid formatting and ignores the rest', () => {
+    const store = new BoardStore()
+    store.add(
+      shape({
+        type: 'sticky',
+        fontSize: 24,
+        bold: true,
+        italic: true,
+        strike: true,
+        align: 'left',
+      }),
+    )
+    expect(store.get('a')).toMatchObject({
+      fontSize: 24,
+      bold: true,
+      italic: true,
+      strike: true,
+      align: 'left',
+    })
+
+    const map = store.doc.getMap('shapes').get('a') as Y.Map<unknown>
+    store.doc.transact(() => {
+      map.set('fontSize', 5000)
+      map.set('bold', 'yes')
+      map.set('align', 'justify')
+    })
+    const read = store.get('a')!
+    expect([read.fontSize, read.bold, read.align]).toEqual([undefined, undefined, undefined])
+  })
+
+  it('gives sizes only to boxes, and no formatting to pen strokes or arrows', () => {
+    const store = new BoardStore()
+    store.add(shape({ id: 't', type: 'text', fontSize: 36, bold: true }))
+    store.add(shape({ id: 'r', type: 'arrow', bold: true, align: 'left' }))
+    expect(store.get('t')).toMatchObject({ bold: true })
+    expect(store.get('t')?.fontSize).toBeUndefined()
+    expect(store.get('r')?.bold).toBeUndefined()
+    expect(store.get('r')?.align).toBeUndefined()
+  })
+
+  it('merges one person formatting a note while another types in it', () => {
+    const [a, b] = connectedPair()
+    a.add(shape({ type: 'sticky', text: 'plan' }))
+    a.update('a', { bold: true })
+    b.update('a', { text: 'plan the trip' })
+    for (const store of [a, b])
+      expect(store.get('a')).toMatchObject({ bold: true, text: 'plan the trip' })
+  })
+})
+
 describe('two clients', () => {
   it("see each other's changes", () => {
     const [a, b] = connectedPair()

@@ -9,7 +9,7 @@ interface Props {
   state: EditorState
 }
 
-/** Top-left corner: back to the home page, the board's title, undo and redo. */
+/** Top-left corner: back to the home page, the board's title, undo, redo and clear. */
 export function BoardHeader({ editor, state }: Props) {
   return (
     <header className="panel board-header">

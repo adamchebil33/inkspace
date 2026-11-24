@@ -102,14 +102,14 @@ export const EyeIcon = () => (
   </Icon>
 )
 
-/** The Inkspace mark: a pen squiggle on a rounded square. */
+/** The Inkspace mark: a pen squiggle on a yellow sticky note, the same in both themes. */
 export const Logo = ({ size = 28 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-    <rect width="32" height="32" rx="8" fill="var(--accent)" />
+    <rect width="32" height="32" rx="7" fill="#ffe066" />
     <path
       d="M7 20c3-9 6-9 9-1s6 4 9-6"
       fill="none"
-      stroke="var(--accent-fg)"
+      stroke="#1c1c1a"
       strokeWidth="3"
       strokeLinecap="round"
     />
@@ -188,5 +188,73 @@ export const ResetIcon = () => (
   <Icon>
     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
     <path d="M3 3v5h5" />
+  </Icon>
+)
+
+export const TrashIcon = () => (
+  <Icon>
+    <path d="M3 6h18" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </Icon>
+)
+
+export const BoldIcon = () => (
+  <Icon>
+    <path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" />
+  </Icon>
+)
+
+export const ItalicIcon = () => (
+  <Icon>
+    <path d="M19 4h-9" />
+    <path d="M14 20H5" />
+    <path d="M15 4 9 20" />
+  </Icon>
+)
+
+export const StrikeIcon = () => (
+  <Icon>
+    <path d="M16 4H9a3 3 0 0 0-2.83 4" />
+    <path d="M14 12a4 4 0 0 1 0 8H6" />
+    <path d="M4 12h16" />
+  </Icon>
+)
+
+export const AlignLeftIcon = () => (
+  <Icon>
+    <path d="M21 5H3" />
+    <path d="M15 12H3" />
+    <path d="M17 19H3" />
+  </Icon>
+)
+
+export const AlignCenterIcon = () => (
+  <Icon>
+    <path d="M21 5H3" />
+    <path d="M17 12H7" />
+    <path d="M19 19H5" />
+  </Icon>
+)
+
+export const AlignRightIcon = () => (
+  <Icon>
+    <path d="M21 5H3" />
+    <path d="M21 12H9" />
+    <path d="M21 19H7" />
+  </Icon>
+)
+
+export const ArrowRightIcon = () => (
+  <Icon>
+    <path d="M5 12h14" />
+    <path d="m12 5 7 7-7 7" />
+  </Icon>
+)
+
+export const ExternalIcon = () => (
+  <Icon>
+    <path d="M7 17 17 7" />
+    <path d="M7 7h10v10" />
   </Icon>
 )

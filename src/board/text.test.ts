@@ -1,8 +1,41 @@
 import { describe, expect, it } from 'vitest'
-import { diffText, shiftCaret, wrapText } from './text'
+import { boxTextLines, fontFor, textAlignOf, diffText, shiftCaret, wrapText } from './text'
 
 // Pretend every character is 10 units wide.
 const measure = (s: string) => s.length * 10
+
+describe('formatting', () => {
+  it('builds font strings for canvas and CSS', () => {
+    expect(fontFor({}, 16)).toMatch(/^400 16px /)
+    expect(fontFor({ bold: true, italic: true }, 24, 31.5)).toMatch(/^italic 700 24px\/31.5px /)
+  })
+
+  it('centres text in boxes and left-aligns free text unless told otherwise', () => {
+    expect(textAlignOf({ type: 'sticky' })).toBe('center')
+    expect(textAlignOf({ type: 'text' })).toBe('left')
+    expect(textAlignOf({ type: 'rect', align: 'right' })).toBe('right')
+  })
+
+  it('wraps bigger and bolder box text into more lines', () => {
+    // 200 wide, minus 12 padding each side: 176 for text.
+    const note = {
+      id: 'a',
+      type: 'sticky' as const,
+      x: 0,
+      y: 0,
+      w: 200,
+      h: 200,
+      color: 'yellow' as const,
+      text: 'one two three four five six',
+      z: 0,
+    }
+    const styled = (s: string, style?: { bold?: boolean }) => s.length * (style?.bold ? 9 : 6)
+    expect(boxTextLines(note, styled)).toHaveLength(1)
+    expect(boxTextLines({ ...note, bold: true }, styled)).toHaveLength(2)
+    expect(boxTextLines({ ...note, fontSize: 36 }, styled)).toHaveLength(2)
+    expect(boxTextLines({ ...note, fontSize: 36, bold: true }, styled)).toHaveLength(4)
+  })
+})
 
 describe('wrapText', () => {
   it('wraps at word boundaries', () => {

@@ -2,14 +2,16 @@ import { useLayoutEffect, useRef, type CSSProperties } from 'react'
 import type { Editor, EditorState } from '../board/editor'
 import { worldToScreen } from '../board/geometry'
 import {
-  FONT_FAMILY,
   FONT_SIZE,
   LINE_HEIGHT,
+  boxTextLines,
+  boxTextScale,
   diffText,
+  fontFor,
   shiftCaret,
+  textAlignOf,
   textScale,
   textWidth,
-  wrapText,
 } from '../board/text'
 import { PALETTE, SHAPE_TEXT_COLOR } from '../board/theme'
 import { measureText } from '../lib/measure'
@@ -54,34 +56,44 @@ export function TextEditor({ editor, state }: Props) {
 
   const { zoom } = state.camera
   const topLeft = worldToScreen(state.camera, shape)
+  const align = textAlignOf(shape)
+  const formatting: CSSProperties = {
+    textAlign: align,
+    textDecoration: shape.strike ? 'line-through' : 'none',
+  }
   let style: CSSProperties
 
   if (shape.type === 'text') {
-    // Free text: left-aligned, no wrapping, growing as you type.
+    // Free text: no wrapping, growing as you type. The field is wider than
+    // the text so the next letter fits; shift it so the text stays in place.
     const scale = textScale(shape) * zoom
+    const spare = FONT_SIZE * scale * 2
+    const shift = align === 'left' ? 0 : align === 'right' ? spare : spare / 2
     style = {
-      left: topLeft.x,
+      ...formatting,
+      left: topLeft.x - shift,
       top: topLeft.y,
-      width: shape.w * zoom + FONT_SIZE * scale * 2,
+      width: shape.w * zoom + spare,
       height: shape.h * zoom,
-      font: `${FONT_SIZE * scale}px/${LINE_HEIGHT * scale}px ${FONT_FAMILY}`,
+      font: fontFor(shape, FONT_SIZE * scale, LINE_HEIGHT * scale),
       color: shape.color === 'gray' ? 'var(--fg)' : PALETTE[shape.color].stroke,
-      textAlign: 'left',
       whiteSpace: 'pre',
     }
   } else {
-    // Text in a box is centred both ways; pad the textarea to match the canvas.
+    // Text in a box is centred vertically; pad the textarea to match the canvas.
+    const scale = boxTextScale(shape) * zoom
     const width = textWidth(shape)
     const sidePadding = (shape.w - width) / 2
-    const lineCount = wrapText(shape.text, width, measureText).length
-    const topPadding = Math.max(0, (shape.h - lineCount * LINE_HEIGHT) / 2)
+    const lineCount = boxTextLines(shape, measureText).length
+    const topPadding = Math.max(0, (shape.h * zoom - lineCount * LINE_HEIGHT * scale) / 2)
     style = {
+      ...formatting,
       left: topLeft.x,
       top: topLeft.y,
       width: shape.w * zoom,
       height: shape.h * zoom,
-      padding: `${topPadding * zoom}px ${sidePadding * zoom}px 0`,
-      font: `${FONT_SIZE * zoom}px/${LINE_HEIGHT * zoom}px ${FONT_FAMILY}`,
+      padding: `${topPadding}px ${sidePadding * zoom}px 0`,
+      font: fontFor(shape, FONT_SIZE * scale, LINE_HEIGHT * scale),
       color: SHAPE_TEXT_COLOR,
     }
   }
@@ -108,9 +120,32 @@ export function TextEditor({ editor, state }: Props) {
         e.target.setSelectionRange(end, end)
         remember(shape.id)
       }}
-      onBlur={() => editor.stopEditing()}
+      onBlur={(e) => {
+        // Setting the text size moves the focus into the format panel; keep
+        // editing (an empty new text would otherwise be deleted). Clicking the
+        // board still ends editing, through the editor.
+        if (e.relatedTarget instanceof Element && e.relatedTarget.closest('[data-keeps-editing]'))
+          return
+        editor.stopEditing()
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') e.currentTarget.blur()
+        // Formatting applies to the whole shape, so it works while typing too.
+        const key = e.key.toLowerCase()
+        const style =
+          !(e.ctrlKey || e.metaKey) || e.altKey
+            ? null
+            : key === 'b' && !e.shiftKey
+              ? 'bold'
+              : key === 'i' && !e.shiftKey
+                ? 'italic'
+                : key === 'x' && e.shiftKey
+                  ? 'strike'
+                  : null
+        if (style) {
+          e.preventDefault()
+          editor.toggleTextFormat(style)
+        }
       }}
     />
   )

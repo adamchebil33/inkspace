@@ -26,6 +26,10 @@ offline merge when the connection returns, and undo only reverts your own change
   for presenting or walking someone through a board.
 - **A real canvas editor.** Pan and zoom, marquee select, move, resize, duplicate,
   reorder, keyboard shortcuts, touch pinch zoom, light and dark themes.
+- **Text formatting.** Text size, bold, italic, strikethrough and alignment for notes, shapes
+  and text, formatted by one person while another types in the same note.
+- **Clear board.** One button empties the board for everyone, after a confirming second click,
+  and undo brings it all back.
 - **Per-person undo.** Undo and redo step through your own edits and leave everyone
   else's alone.
 - **Share links without accounts.** One link lets people edit, another lets them only
@@ -192,7 +196,8 @@ The first time, install the test browser with `npx playwright install chromium`.
 The browser tests open the same board in separate browser contexts and check, among other
 things, that a change in one window shows up in the other, that two people typing in one
 note keep both their words, that offline edits merge after reconnecting, that undo only
-reverts your own changes, that the server refuses writes from a view-only link or a reset
+reverts your own changes, that formatting and clearing the board reach everyone, that the
+server refuses writes from a view-only link or a reset
 edit link, that a full board turns read-only, and that a fast drag sends far fewer messages
 than mouse moves.
 

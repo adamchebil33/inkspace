@@ -8,6 +8,8 @@
   --hover: #f0f0ec;
   --accent: #4f46e5;
   --accent-fg: #ffffff;
+  --danger: #dc2626;
+  --danger-fg: #ffffff;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
   font-family:
     Inter,
@@ -27,6 +29,8 @@
   --hover: #313136;
   --accent: #818cf8;
   --accent-fg: #14141a;
+  --danger: #f87171;
+  --danger-fg: #14141a;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
@@ -143,6 +147,62 @@ button {
   padding: 8px 10px;
 }
 
+.format {
+  gap: 0;
+  padding: 4px;
+}
+
+.format-group {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.format-group + .format-group {
+  border-left: 1px solid var(--panel-border);
+}
+
+.format .tool {
+  width: 34px;
+  height: 34px;
+}
+
+.format .tool svg {
+  width: 18px;
+  height: 18px;
+}
+
+.size-field {
+  width: 52px;
+  height: 34px;
+  padding: 0 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+}
+
+.size-field::-webkit-inner-spin-button,
+.size-field::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.size-field:hover {
+  border-color: var(--muted);
+}
+
+.size-field:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .zoom {
   position: absolute;
   right: 20px;
@@ -192,10 +252,6 @@ button {
   user-select: none;
   /* Not during the moment an existing board is still loading. */
   animation: appear 0.3s ease-out 0.8s both;
-}
-
-.wordmark .tool {
-  margin-left: auto;
 }
 
 /* ---- Keyboard shortcuts dialog ---- */
@@ -447,6 +503,19 @@ button:focus-visible {
   height: 36px;
 }
 
+.history .clear-board.confirming {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  background: var(--danger);
+  color: var(--danger-fg);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .badge {
   padding: 4px 10px;
   border-radius: 999px;
@@ -532,152 +601,6 @@ button:focus-visible {
   }
 }
 
-/* ---- Home page ---- */
-
-.home {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-}
-
-.home-main {
-  flex: 1;
-  width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 48px 20px 32px;
-}
-
-.wordmark {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.home h1 {
-  margin: 56px 0 12px;
-  font-size: clamp(2rem, 6vw, 3.25rem);
-  line-height: 1.08;
-  letter-spacing: -0.035em;
-  text-wrap: balance;
-}
-
-.lede {
-  max-width: 34em;
-  margin: 0;
-  color: var(--muted);
-  font-size: 1.125rem;
-  line-height: 1.5;
-}
-
-.home-cta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 16px;
-  margin: 28px 0 36px;
-}
-
-.primary {
-  height: 44px;
-  padding: 0 22px;
-  border-radius: 10px;
-  font-size: 16px;
-}
-
-.hint {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.preview {
-  display: block;
-  width: 100%;
-  height: auto;
-  box-shadow: var(--shadow);
-  border-radius: 14px;
-}
-
-.home h2 {
-  margin: 48px 0 12px;
-  font-size: 1rem;
-}
-
-.board-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 12px;
-  margin: 0 0 12px;
-  padding: 0;
-  list-style: none;
-}
-
-.board-list li {
-  position: relative;
-}
-
-.board-card {
-  display: grid;
-  gap: 4px;
-  height: 100%;
-  padding: 14px 36px 14px 14px;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel);
-  color: inherit;
-  text-decoration: none;
-}
-
-.board-card:hover {
-  border-color: var(--accent);
-}
-
-.board-card strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-card small {
-  color: var(--muted);
-}
-
-.forget {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.forget:hover {
-  background: var(--hover);
-  color: var(--fg);
-}
-
-.home-footer {
-  padding: 20px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.home-footer a,
-a:focus-visible {
-  color: var(--accent);
-}
-
 a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -706,6 +629,16 @@ a:focus-visible {
   .history {
     padding-left: 0;
     border-left: 0;
+  }
+
+  /* No room for the label: the red icon alone asks for the second click. */
+  .history .clear-board.confirming {
+    width: 36px;
+    padding: 0;
+  }
+
+  .clear-board.confirming span {
+    display: none;
   }
 }
 
@@ -813,54 +746,6 @@ a:focus-visible {
   cursor: default;
 }
 
-/* Name field on the home page. */
-.name-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 6px 0 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel);
-}
-
-.name-field:focus-within {
-  border-color: var(--accent);
-}
-
-.name-field .avatar {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  font-size: 11px;
-  cursor: text;
-}
-
-.name-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.name-field .name-input {
-  width: 170px;
-  border: 0;
-  background: transparent;
-  font-size: 15px;
-}
-
-.name-field .name-input:focus {
-  outline: none;
-}
-
-.home-cta .hint {
-  flex-basis: 100%;
-}
-
 .share-heading {
   margin: 8px 10px 2px;
   padding-top: 10px;
@@ -907,57 +792,6 @@ a:focus-visible {
   outline-offset: 1px;
   position: relative;
   z-index: 1;
-}
-
-/* ---- Templates on the home page ---- */
-
-.template-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  margin: 0 0 36px;
-  padding: 0;
-  list-style: none;
-}
-
-.template-card {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  height: 100%;
-  padding: 8px 8px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel);
-  text-align: left;
-  cursor: pointer;
-}
-
-.template-card:hover {
-  border-color: var(--accent);
-}
-
-.template-card strong {
-  margin: 4px 4px 0;
-  font-size: 14px;
-}
-
-.template-card small {
-  margin: 0 4px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.template-preview {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 6px;
-}
-
-.home-cta + section h2 {
-  margin-top: 0;
 }
 
 .board-full {

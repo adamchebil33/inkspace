@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import * as Y from 'yjs'
 import { Editor, type PointerInput } from './editor'
 import { BoardStore } from './store'
 
@@ -322,6 +323,180 @@ describe('text', () => {
 
     editor.setText(id, 'abcdefgh')
     expect(store.get(id)).toMatchObject({ w: before.w * 4, h: before.h * 2 })
+  })
+})
+
+describe('clearing the board', () => {
+  it("deletes every shape, other people's too, as one undo step", () => {
+    const other = new BoardStore()
+    store.doc.on('update', (update: Uint8Array) => Y.applyUpdate(other.doc, update))
+    other.doc.on('update', (update: Uint8Array) => Y.applyUpdate(store.doc, update))
+    drawRect(0, 0, 100, 100)
+    drawRect(200, 0, 300, 100)
+    other.add({
+      id: 'theirs',
+      type: 'sticky',
+      x: 0,
+      y: 200,
+      w: 100,
+      h: 100,
+      color: 'yellow',
+      text: 'hi',
+      z: 9,
+    })
+    editor.setTool('text')
+    click(at(400, 400))
+    expect(editor.getState().editingId).not.toBeNull()
+
+    editor.clearBoard()
+    expect(store.list()).toEqual([])
+    expect(other.list()).toEqual([])
+    expect(editor.getState()).toMatchObject({ selection: [], editingId: null })
+
+    editor.undo()
+    expect(store.list()).toHaveLength(3)
+    expect(other.get('theirs')).toMatchObject({ text: 'hi' })
+  })
+
+  it('does nothing on a view-only board', () => {
+    drawRect(0, 0, 100, 100)
+    editor.setReadOnly(true)
+    editor.clearBoard()
+    expect(store.list()).toHaveLength(1)
+  })
+})
+
+describe('text formatting', () => {
+  /** A sticky note with some text, selected. */
+  function sticky(x: number, text = 'Note'): string {
+    editor.setTool('sticky')
+    click(at(x, 0))
+    editor.setText(editor.getState().editingId!, text)
+    editor.stopEditing()
+    return editor.getState().selection[0]!
+  }
+
+  it('has nothing to format unless the selection holds text', () => {
+    expect(editor.getTextFormat()).toBeNull()
+    editor.setTool('pen')
+    drag(at(0, 0), at(50, 50))
+    editor.selectAll()
+    expect(editor.getTextFormat()).toBeNull()
+  })
+
+  it('has nothing to format on a shape just drawn, until it gets text', () => {
+    const id = drawRect(0, 0, 200, 100)
+    expect(editor.getState().selection).toEqual([id])
+    expect(editor.getTextFormat()).toBeNull()
+
+    // Typing into it: format it while typing, and afterwards while selected.
+    editor.startEditing(id)
+    expect(editor.getTextFormat()).not.toBeNull()
+    editor.setText(id, 'Plan')
+    editor.stopEditing()
+    expect(editor.getTextFormat()).not.toBeNull()
+  })
+
+  it('has nothing to format while a drawing tool is active', () => {
+    sticky(0)
+    editor.setTool('rect')
+    expect(editor.getTextFormat()).toBeNull()
+  })
+
+  it('shows the defaults for a new note', () => {
+    sticky(0)
+    expect(editor.getTextFormat()).toEqual({
+      fontSize: 16,
+      bold: false,
+      italic: false,
+      strike: false,
+      align: 'center',
+    })
+  })
+
+  it('formats every selected shape that has text, and leaves the others alone', () => {
+    const a = sticky(0)
+    const b = sticky(300)
+    const empty = sticky(600, '')
+    editor.setTool('arrow')
+    drag(at(0, 400), at(100, 400))
+    editor.selectAll()
+
+    editor.setTextFormat({ fontSize: 40, align: 'left' })
+    for (const id of [a, b]) expect(store.get(id)).toMatchObject({ fontSize: 40, align: 'left' })
+    const arrow = store.list().find((s) => s.type === 'arrow')!
+    expect(arrow.fontSize).toBeUndefined()
+    expect(store.get(empty)?.fontSize).toBeUndefined()
+    expect(editor.getTextFormat()).toMatchObject({ fontSize: 40, align: 'left' })
+  })
+
+  it('keeps sizes within limits', () => {
+    const id = sticky(0)
+    editor.setTextFormat({ fontSize: 1000 })
+    expect(store.get(id)?.fontSize).toBe(200)
+    editor.setTextFormat({ fontSize: 2 })
+    expect(store.get(id)?.fontSize).toBe(8)
+    editor.setTextFormat({ fontSize: 13.333 })
+    expect(store.get(id)?.fontSize).toBe(13.3)
+  })
+
+  it('turns a style on for all when only some have it, then off for all', () => {
+    const a = sticky(0)
+    const b = sticky(300)
+    click(at(0, 0))
+    editor.toggleTextFormat('bold')
+    expect(store.get(a)?.bold).toBe(true)
+
+    editor.selectAll()
+    expect(editor.getTextFormat()?.bold).toBe(false)
+    editor.toggleTextFormat('bold')
+    expect([store.get(a)?.bold, store.get(b)?.bold]).toEqual([true, true])
+    editor.toggleTextFormat('bold')
+    expect(store.get(a)?.bold || store.get(b)?.bold).toBeFalsy()
+    expect(editor.getTextFormat()?.bold).toBe(false)
+  })
+
+  it('reports mixed sizes and alignments as none', () => {
+    sticky(0)
+    editor.setTextFormat({ fontSize: 12, align: 'right' })
+    sticky(300)
+    editor.selectAll()
+    expect(editor.getTextFormat()).toMatchObject({ fontSize: null, align: null })
+  })
+
+  it('resizes a text shape to the chosen size, and to its wider bold letters', () => {
+    editor.setTool('text')
+    click(at(0, 0))
+    const id = editor.getState().editingId!
+    // The test editor measures 8 units per character, 8.8 in bold.
+    editor.setText(id, 'abcd')
+    expect(store.get(id)).toMatchObject({ w: 32, h: 21 })
+
+    editor.setTextFormat({ fontSize: 24 })
+    expect(store.get(id)).toMatchObject({ w: 48, h: 31.5 })
+    expect(store.get(id)?.fontSize).toBeUndefined()
+    expect(editor.getTextFormat()?.fontSize).toBe(24)
+
+    editor.toggleTextFormat('bold')
+    expect(store.get(id)?.w).toBeCloseTo(52.8)
+    expect(store.get(id)?.h).toBeCloseTo(31.5)
+    // Typing keeps measuring in bold.
+    editor.setText(id, 'abcdabcd')
+    expect(store.get(id)?.w).toBeCloseTo(105.6)
+  })
+
+  it('is one undo step, and is ignored on a view-only board', () => {
+    const id = sticky(0)
+    editor.setTextFormat({ italic: true, strike: true })
+    editor.undo()
+    expect(store.get(id)).toMatchObject({ text: 'Note' })
+    expect(store.get(id)?.italic).toBeUndefined()
+
+    editor.redo()
+    editor.setReadOnly(true)
+    editor.selectAll()
+    editor.setTextFormat({ bold: true })
+    expect(store.get(id)?.bold).toBeUndefined()
   })
 })
 

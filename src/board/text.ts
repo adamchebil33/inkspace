@@ -1,10 +1,53 @@
-import type { Shape } from './types'
+import { MAX_FONT_SIZE, MIN_FONT_SIZE, type Shape, type ShapeType, type TextAlign } from './types'
 
 export const FONT_SIZE = 16
 export const LINE_HEIGHT = 21
 export const TEXT_PADDING = 12
 export const FONT_FAMILY = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
 export const FONT = `${FONT_SIZE}px ${FONT_FAMILY}`
+
+/** A text size brought into the allowed range, to a tenth of a unit. */
+export const clampFontSize = (size: number): number =>
+  Math.round(Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size)) * 10) / 10
+
+/** The parts of a shape's formatting that change how wide its text is. */
+export interface FontStyle {
+  bold?: boolean
+  italic?: boolean
+}
+
+/**
+ * Width of a string at the base font size, in the given style. Injected
+ * wherever text is laid out, so the editor and its tests need no DOM.
+ */
+export type Measure = (text: string, style?: FontStyle) => number
+
+/** A canvas or CSS font string. (Only CSS uses the line height.) */
+export function fontFor(style: FontStyle, size: number, lineHeight?: number): string {
+  const height = lineHeight === undefined ? '' : `/${lineHeight}px`
+  return `${style.italic ? 'italic ' : ''}${style.bold ? 700 : 400} ${size}px${height} ${FONT_FAMILY}`
+}
+
+/** How big a box shape's text is, relative to the base font. */
+export const boxTextScale = (shape: Pick<Shape, 'fontSize'>): number =>
+  (shape.fontSize ?? FONT_SIZE) / FONT_SIZE
+
+/** The text size a shape shows: its own for a box, from its scale for a text shape. */
+export const fontSizeOf = (shape: Shape): number =>
+  shape.type === 'text'
+    ? Math.round(FONT_SIZE * textScale(shape) * 10) / 10
+    : (shape.fontSize ?? FONT_SIZE)
+
+export const textAlignOf = (shape: Pick<Shape, 'type' | 'align'>): TextAlign =>
+  shape.align ?? defaultAlign(shape.type)
+
+export const defaultAlign = (type: ShapeType): TextAlign => (type === 'text' ? 'left' : 'center')
+
+/** The lines of a box shape's text, wrapped to fit inside it. */
+export function boxTextLines(shape: Shape, measure: Measure): string[] {
+  const scale = boxTextScale(shape)
+  return wrapText(shape.text, textWidth(shape), (s) => measure(s, shape) * scale)
+}
 
 /** Width available for text inside a shape, in world units. */
 export function textWidth(shape: Pick<Shape, 'type' | 'w'>): number {
