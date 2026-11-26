@@ -4,7 +4,7 @@
 
 **Live demo:** https://inkspace.adamchebil.workers.dev (open it in two windows to see live sync)
 
-![Two people editing the same board in two browser windows](docs/demo.gif)
+https://github.com/user-attachments/assets/3cc4d2e4-c7b1-4ac7-92f7-beca76636077
 
 Sticky notes, shapes, arrows, a pen and text on an endless canvas. No sign-up: a board is
 a link. Everyone on it sees each other's cursors and edits as they happen, edits made

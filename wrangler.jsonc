@@ -4,10 +4,12 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-25",
   "assets": {
+    // Lets the Worker read static files: it serves /media/* itself (see worker/media.ts).
+    "binding": "ASSETS",
     // Unknown paths fall back to index.html so client-side routes work.
     "not_found_handling": "single-page-application",
-    // Only /api/* reaches the Worker; everything else is served as a static file.
-    "run_worker_first": ["/api/*"],
+    // Only /api/* and /media/* reach the Worker; everything else is served as a static file.
+    "run_worker_first": ["/api/*", "/media/*"],
   },
   "durable_objects": {
     "bindings": [{ "name": "BOARD_ROOM", "class_name": "BoardRoom" }],

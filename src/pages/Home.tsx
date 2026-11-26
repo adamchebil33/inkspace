@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { boardIdForOwner, newOwnerKey } from '../../shared/boardKey'
 import { TEMPLATES, type TemplateId } from '../board/templates'
 import { ArrowRightIcon, CloseIcon, ExternalIcon, Logo } from '../components/icons'
+import { DemoVideo } from '../components/DemoVideo'
 import { HeroDemo } from '../components/HeroDemo'
 import { TemplatePreview } from '../components/TemplatePreview'
 import { ThemeToggle } from '../components/ThemeToggle'
@@ -114,6 +115,15 @@ export function Home() {
           </figure>
         </section>
 
+        <section className="home-section" aria-labelledby="tour-heading">
+          <div className="section-head">
+            <h2 id="tour-heading" className="tour-heading">
+              Watch the demo
+            </h2>
+          </div>
+          <DemoVideo />
+        </section>
+
         <section className="home-section" aria-labelledby="templates-heading">
           <div className="section-head">
             <h2 id="templates-heading">Start from a template</h2>
@@ -141,7 +151,6 @@ export function Home() {
           <section className="home-section" aria-labelledby="recent-heading">
             <div className="section-head">
               <h2 id="recent-heading">Your recent boards</h2>
-              <p>Kept in this browser. Removing one here doesn't delete the board.</p>
             </div>
             <ul className="board-list">
               {boards.map((board) => (

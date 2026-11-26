@@ -1,13 +1,19 @@
 import { BOARD_ID_PATTERN } from '../shared/boardKey'
 import type { SummaryResponse } from '../shared/summary'
+import { serveMedia } from './media'
 
-// HTTP routing for /api/*. Static files are served by the assets layer and
-// never reach this code (see wrangler.jsonc).
+// HTTP routing for /api/* and /media/*. Other static files are served by the
+// assets layer and never reach this code (see wrangler.jsonc).
 
 const json = (body: unknown, status = 200) => Response.json(body, { status })
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
+
+  // The demo video, which needs byte ranges (see media.ts).
+  if (url.pathname.startsWith('/media/')) {
+    return serveMedia(request, env.ASSETS)
+  }
 
   if (url.pathname === '/api/health') {
     return json({ ok: true })
