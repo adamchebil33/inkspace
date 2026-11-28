@@ -60,12 +60,6 @@ npm run dev
 
 Open http://localhost:5173, create a board and open its link in a second window.
 
-## Learn more
-
-[How Inkspace works](docs/ARCHITECTURE.md) covers the architecture, the problems worth
-reading about (conflict handling, the sync server, links without accounts), tests and
-deploying your own copy.
-
 ## License
 
 [MIT](LICENSE)
